@@ -1418,16 +1418,16 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
       if (CodeGenOpts.OptimizationLevel == 0) {
         PB.registerOptimizerLastEPCallback(
             [](ModulePassManager &MPM, OptimizationLevel Level) {
-              MPM.addPass(AnnotateLKMMDeps());
+              MPM.addPass(LKMMAnnotateDepsPass());
             });
       } else {
         PB.registerPipelineStartEPCallback(
             [](ModulePassManager &MPM, OptimizationLevel Level) {
-              MPM.addPass(AnnotateLKMMDeps());
+              MPM.addPass(LKMMAnnotateDepsPass());
             });
         PB.registerOptimizerLastEPCallback(
             [](ModulePassManager &MPM, OptimizationLevel Level) {
-              MPM.addPass(VerifyLKMMDeps());
+              MPM.addPass(LKMMVerifyDepsPass());
             });
       }
     }
