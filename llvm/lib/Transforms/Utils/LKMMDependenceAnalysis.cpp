@@ -23,6 +23,7 @@
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
@@ -32,6 +33,7 @@
 
 namespace llvm {
 namespace {
+std::unordered_map<Instruction*, std::string> Annotations;
 
 // Represents a map of IDs to (potential) dependency halfs.
 template <typename T> using DepHalfMap = std::unordered_map<std::string, T>;
@@ -116,6 +118,8 @@ protected:
   // representation of the calls the BFS took to reach Inst, including inst, and
   // are assumed to be unique within the BFS.
   const std::string PathTo;
+
+  void addAnnotation(Instruction *I, std::string S) const;
 
   DepHalf(Instruction *I, std::string PathTo, DepKind Kind)
       : I(I), PathTo(PathTo), Kind(Kind){};
@@ -838,7 +842,6 @@ public:
     prepareInterproc(BB, CallI);
   }
 
-private:
   /// Inserts the bugs in the testing functions. Will output to errs() if the
   /// desired annotation can't be found.
   ///
@@ -869,6 +872,8 @@ public:
     prepareInterproc(BB, CallI);
   }
 
+  void visitDbgValueInst(DbgValueInst &DVI);
+
   /// Responsible for handling an instruction with at least one '!annotation'
   /// type metadata node. Immediately returns if it doesn't find at least one
   /// dependency annotation.
@@ -877,7 +882,7 @@ public:
   ///  attached.
   /// \param MDAnnotation a pointer to the \p MDNode containing the dependency
   ///  annotation(s).
-  void handleDepAnnotations(Instruction *I, MDNode *MDAnnotation);
+  void handleDepAnnotations(Instruction *I, StringRef MDAnnotation);
 
   /// Returns the result of a Verification BFS, i.e. the dependencies which
   /// couldn't be verified.
@@ -963,6 +968,13 @@ std::string DepHalf::getID() const {
     return VDH->getParsedID();
   else
     llvm_unreachable("unhandled case in getID");
+}
+
+void DepHalf::addAnnotation(Instruction *I, std::string S) const {
+  if(Annotations.find(I) != Annotations.end())
+    Annotations.at(I).append(S);
+  else 
+    Annotations.emplace(I, S);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1130,13 +1142,15 @@ void PotAddrDepBeg::addAdrDep(std::string PathTo2, Instruction *I2,
 
   auto ID = getID() + PathTo2;
 
-  std::string begin_annotation =
+  std::string BeginAnnotation =
       "LKMMDep: address dep begin," + ID + "," + getPathTo() + ";";
-  std::string end_annotation = "LKMMDep: address dep end," + ID + "," + PathTo2 +
-                               "," + std::to_string(FDep) + ";";
 
-  I->addAnnotationMetadata(begin_annotation);
-  I2->addAnnotationMetadata(end_annotation);
+  addAnnotation(I, BeginAnnotation);
+
+  std::string EndAnnotation = "LKMMDep: address dep end," + ID + "," + PathTo2 +
+                              "," + std::to_string(FDep) + ";";
+
+  addAnnotation(I2, EndAnnotation);
 }
 
 bool PotAddrDepBeg::depChainsShareValue(
@@ -1202,11 +1216,12 @@ void PotCtrlDepBeg::addCtrlDep(std::string PathTo2, Instruction *I2) const {
   std::string BeginAnnotation = "LKMMDep: ctrl dep begin," + ID + "," +
                                 getPathTo() + "," + getPathToBranch() + ";";
 
+  addAnnotation(I, BeginAnnotation);
+
   std::string EndAnnotation =
       "LKMMDep: ctrl dep end," + ID + "," + PathTo2 + ";";
 
-  I->addAnnotationMetadata(BeginAnnotation);
-  I2->addAnnotationMetadata(EndAnnotation);
+  addAnnotation(I2, EndAnnotation);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1569,6 +1584,11 @@ void BFSCtx::visitReturnInst(ReturnInst &RetI) {
     ReturnedCDBs.emplace(CDB.first, CDB.second);
 }
 
+void VerCtx::visitDbgValueInst(DbgValueInst &DVI) {
+  if (auto *I = dyn_cast<Instruction>(DVI.getVariableLocationOp(0)))
+    handleDepAnnotations(I, DVI.getVariable()->getName());
+}
+
 // Explicitly excluded cases.
 void BFSCtx::visitAllocaInst(AllocaInst &AllocaI) {}
 void BFSCtx::visitFenceInst(FenceInst &FenceI) {}
@@ -1578,10 +1598,6 @@ void BFSCtx::visitFuncletPadInst(FuncletPadInst &FuncletPadI) {}
 void BFSCtx::visitTerminator(Instruction &TermI) {}
 
 void BFSCtx::handleLoadStoreInst(Instruction &I) {
-  if (auto *VC = dyn_cast<VerCtx>(this))
-    if (auto *MDAnnotation = I.getMetadata("annotation"))
-      VC->handleDepAnnotations(&I, MDAnnotation);
-
   auto *VAdd = isa<StoreInst>(I) ? I.getOperand(1) : cast<Value>(&I);
 
   // Operand which can end an address dependency
@@ -1622,13 +1638,12 @@ void AnnotCtx::insertBug(Function *F, Instruction::MemoryOps IOpCode,
                          std::string AnnotationType) {
   Instruction *InstWithAnnotation = nullptr;
 
-  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-    if (auto md = I->getMetadata("annotation")) {
-      if (cast<MDString>(md->getOperand(0))
-              ->getString()
-              .contains(AnnotationType) &&
-          (I->getOpcode() == IOpCode)) {
-        InstWithAnnotation = &*I;
+  for (auto II = inst_begin(F), E = inst_end(F); II != E; ++II) {
+    if (auto DVI = dyn_cast<DbgValueInst>(&*II)) {
+      if (DVI->getVariable()->getName().contains(AnnotationType) &&
+          (cast<Instruction>(DVI->getVariableLocationOp(0))->getOpcode() ==
+           IOpCode)) {
+        InstWithAnnotation = cast<Instruction>(DVI->getVariableLocationOp(0));
         break;
       }
     }
@@ -1717,12 +1732,14 @@ bool VerCtx::HandleAddrDepID(std::string &ID, Instruction *I,
   return false;
 }
 
-void VerCtx::handleDepAnnotations(Instruction *I, MDNode *MDAnnotation) {
+void VerCtx::handleDepAnnotations(Instruction *I, StringRef Annotations) {
   // For non-greedy verification
   std::unordered_set<int> AddedEndings{};
 
-  for (auto &MDOp : MDAnnotation->operands()) {
-    auto CurrentDepHalfStr = cast<MDString>(MDOp.get())->getString();
+  auto AnnotPair = Annotations.split(";");
+
+  while (!AnnotPair.second.empty()) {
+    auto CurrentDepHalfStr = AnnotPair.first;
 
     if (!CurrentDepHalfStr.contains("LKMMDep"))
       continue;
@@ -1859,8 +1876,10 @@ PreservedAnalyses LKMMAnnotateDepsPass::run(Module &M, ModuleAnalysisManager &AM
 
     // assert(NumOfRets < 2 && "assert failed for more less than one return");
 
+    AnnotCtx AC(&*F.begin());
+
     // Annotate dependencies.
-    AnnotCtx(&*F.begin()).runBFS();
+    AC.runBFS();
 
     // Insert bugs if the BFS just annotated a testing function.
     // if (F.hasName()) {
@@ -1870,24 +1889,49 @@ PreservedAnalyses LKMMAnnotateDepsPass::run(Module &M, ModuleAnalysisManager &AM
     //   if (FName.contains("doitlk_rr_addr_dep_begin") ||
     //       FName.contains("doitlk_rw_addr_dep_begin") ||
     //       FName.contains("doitlk_ctrl_dep_begin")) {
-    //     insertBug(&F, Instruction::Load, "dep begin");
+    //     AC.insertBug(&F, Instruction::Load, "dep begin");
     //     InsertedBugs = true;
     //   }
 
     //   // Break read -> read addr dep endings.
     //   else if (FName.contains("doitlk_rr_addr_dep_end")) {
-    //     insertBug(&F, Instruction::Load, "dep end");
+    //     AC.insertBug(&F, Instruction::Load, "dep end");
     //     InsertedBugs = true;
     //   }
 
     //   // Break read -> write addr dep and ctrl dep endings.
     //   else if (FName.contains("doitlk_rw_addr_dep_end") ||
     //            FName.contains("doitlk_ctrl_dep_end")) {
-    //     insertBug(&F, Instruction::Store, "dep end");
+    //     AC.insertBug(&F, Instruction::Store, "dep end");
     //     InsertedBugs = true;
     //   }
     // }
   }
+
+  DIBuilder DIB(M);
+
+  auto file = DIB.createFile("LKMMDepFile", "LKMMDepDir");
+
+  for (auto P : Annotations) {
+    auto DIL = DILocation::get(M.getContext(), 0, 0,
+                               P.first->getFunction()->getSubprogram());
+
+    auto DILV =
+        DIB.createAutoVariable(P.first->getFunction()->getSubprogram(),
+                               P.second, file, 0, DIB.createNullPtrType());
+
+    auto *nextNode = P.first->getNextNode();
+
+    if (nextNode) {
+      DIB.insertDbgValueIntrinsic(P.first, DILV, DIB.createExpression(), DIL,
+                                  nextNode);
+    } else {
+      DIB.insertDbgValueIntrinsic(P.first, DILV, DIB.createExpression(), DIL,
+                                  P.first->getParent());
+    }
+  }
+
+  M.getFunction("doitlk_ctrl_dep_begin_7")->dump();
 
   return InsertedBugs ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
