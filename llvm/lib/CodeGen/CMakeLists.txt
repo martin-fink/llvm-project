@@ -40,6 +40,7 @@ add_llvm_component_library(LLVMCodeGen
   CFGuardLongjmp.cpp
   CFIFixup.cpp
   CFIInstrInserter.cpp
+  CheckBrokenDeps.cpp
   CodeGen.cpp
   CodeGenCommonISel.cpp
   CodeGenPassBuilder.cpp

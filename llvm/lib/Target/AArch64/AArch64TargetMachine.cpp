@@ -721,6 +721,9 @@ void AArch64PassConfig::addMachineSSAOptimization() {
 }
 
 bool AArch64PassConfig::addILPOpts() {
+    // TODO: annotate pass here
+    // errs() << "Adding annotate pass\n";
+
   if (EnableCondOpt)
     addPass(createAArch64ConditionOptimizerPass());
   if (EnableCCMP)
@@ -833,6 +836,9 @@ void AArch64PassConfig::addPreEmitPass2() {
   // SVE bundles move prefixes with destructive operations. BLR_RVMARKER pseudo
   // instructions are lowered to bundles as well.
   addPass(createUnpackMachineBundles(nullptr));
+
+  addPass(createCheckDepsPass());
+  // TODO: add check pass here :)
 }
 
 MachineFunctionInfo *AArch64TargetMachine::createMachineFunctionInfo(

@@ -35,6 +35,7 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ValueMap.h"
@@ -2418,6 +2419,28 @@ PreservedAnalyses LKMMAnnotator::run(Module &M, ModuleAnalysisManager &AM) {
                FName.contains("proj_bdo_ctrl_dep_end")) {
         AC.insertBug(&F, Instruction::Store, "dep end");
         InsertedBugs = true;
+      }
+    }
+  }
+
+  // copying metadata into pc sections for backend checks
+  MDBuilder MDB(M.getContext());
+  for (auto &F : M) {
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        // TODO: remove this
+        // I.addAnnotationMetadata(ADBStr);
+
+        auto *MDA = I.getMetadata(LLVMContext::MD_annotation);
+        if (!MDA) {
+          continue;
+        }
+
+        for (auto &MDAOp : MDA->operands()) {
+          if (cast<MDString>(MDAOp.get())->getString().contains("LKMMDep:")) {
+            I.setMetadata(LLVMContext::MD_pcsections, MDB.createPCSections({{cast<MDString>(MDAOp.get())->getString(), {}}}));
+          }
+        }
       }
     }
   }
