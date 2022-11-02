@@ -1,4 +1,5 @@
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -6,7 +7,9 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -14,10 +17,13 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Support/Casting.h"
 #include <list>
+#include <optional>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -34,7 +40,9 @@ template <typename T> using DepHalfMap = std::unordered_map<std::string, T>;
 
 using CallPathStack = std::list<MachineInstr *>;
 
-using InstIdentifier = std::string;
+// using InstIdentifier = std::string;
+// TODO: check if this works or if we need to switch to a string again
+using InstIdentifier = MachineInstr *;
 
 using DepChain = std::unordered_set<InstIdentifier>;
 
@@ -48,15 +56,24 @@ using BBtoBBSetMap =
     std::unordered_map<MachineBasicBlock *,
                        std::unordered_set<MachineBasicBlock *>>;
 
-bool hasAnnotation(MachineInstr *MI, std::string &A) {
+std::optional<StringRef> getLKMMAnnotation(MachineInstr *MI) {
   MDNode *MDN = MI->getPCSections();
-  if (!MDN) {
-    return false;
+  if (!MDN || MDN->getNumOperands()) {
+    return {};
   }
 
-  MDN->dump();
-  // TODO:
-  return false;
+  auto *MD = dyn_cast<MDString>(MDN->getOperand(0).get());
+  if (!MD) {
+    return {};
+  }
+
+  return MD->getString();
+}
+
+bool hasAnnotation(MachineInstr *MI, std::string &A) {
+  auto PCAnnotation = getLKMMAnnotation(MI);
+
+  return PCAnnotation && PCAnnotation == A;
 }
 
 std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
@@ -89,6 +106,69 @@ std::string getCalledFunctionName(MachineInstr *MI) {
   }
 
   return FunctionOperand.getGlobal()->getName().str();
+}
+
+class RegisterValueMapping {
+public:
+  RegisterValueMapping() : RegisterValueMap() {}
+
+  std::set<MachineInstr *> getValuesForRegisters(MachineInstr *MI);
+
+private:
+  std::map<MachineBasicBlock *, std::map<Register, std::set<MachineInstr *>>>
+      RegisterValueMap;
+
+  std::set<MachineInstr *> getValuesForRegister(MachineBasicBlock *MBB,
+                                                Register Reg);
+};
+
+std::set<MachineInstr *>
+RegisterValueMapping::getValuesForRegister(MachineBasicBlock *MBB,
+                                           Register Reg) {
+  auto &RegMap = RegisterValueMap[MBB];
+
+  // check if we already computed this
+  if (auto Val = RegMap.find(Reg); Val != RegMap.end()) {
+    return Val->second;
+  }
+
+  // if not, we walk the basic black backwards and check for a write to Reg
+  for (auto It = MBB->rbegin(); It != MBB->rend(); ++It) {
+    // instruction defines register, it is the only instruction that should be
+    // returned
+    if (It->definesRegister(Reg)) {
+      RegMap[Reg] = {&*It};
+      return {&*It};
+    }
+  }
+
+  // register was not defined in this, we need to look it up in the predecessors
+  std::set<MachineInstr *> Result{};
+
+  for (auto &Pred : MBB->predecessors()) {
+    auto PredResult = getValuesForRegister(Pred, Reg);
+    Result.insert(PredResult.begin(), PredResult.end());
+  }
+  RegMap[Reg] = Result;
+
+  // TODO: handle register arguments
+  // for this we need to check all argument registers for the current
+  // architecture, as well as arguments passed over the stack
+
+  return Result;
+}
+
+std::set<MachineInstr *>
+RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
+  std::set<MachineInstr *> Deps{};
+  for (auto Op : MI->operands()) {
+    if (Op.isReg() && MI->readsRegister(Op.getReg())) {
+      auto DepsForReg = getValuesForRegister(MI->getParent(), Op.getReg());
+      Deps.insert(DepsForReg.begin(), DepsForReg.end());
+    }
+  }
+
+  return Deps;
 }
 
 // struct BFSBBInfo {
@@ -247,7 +327,8 @@ public:
   /// \param I the instruction which is currently being checked.
   /// \param ValCmp the value which might or might not be part of a DepChain.
   /// \param ValAdd the value to add if \p ValCmp is part of a DepChain.
-  bool tryAddValueToDepChains(MachineInstr *MI, InstIdentifier InstCmp,
+  bool tryAddValueToDepChains(RegisterValueMapping &RegisterValueMap,
+                              MachineInstr *MI, InstIdentifier InstCmp,
                               InstIdentifier InstAdd);
 
   /// Checks if a value is part of all dep chains starting at this
@@ -963,9 +1044,9 @@ void PotAddrDepBeg::addToDCUnion(llvm::MachineBasicBlock *MBB,
   DCM.at(MBB).second.insert(InstID);
 }
 
-bool PotAddrDepBeg::tryAddValueToDepChains(llvm::MachineInstr *MI,
-                                           InstIdentifier InstCmp,
-                                           InstIdentifier InstAdd) {
+bool PotAddrDepBeg::tryAddValueToDepChains(
+    RegisterValueMapping &RegisterValueMap, llvm::MachineInstr *MI,
+    InstIdentifier InstCmp, InstIdentifier InstAdd) {
   if (!isAt(MI->getParent())) {
     return false;
   }
@@ -986,10 +1067,11 @@ bool PotAddrDepBeg::tryAddValueToDepChains(llvm::MachineInstr *MI,
     DCInter.insert(InstAdd);
     Ret = true;
   } else if (MI->mayStore()) {
-    // TODO: get actual operand that is being stored
-    //    auto *PotRedefOp = MI->getOperand(1);
-    //    if (DCInter.find(PotRedefOp) != DCInter.end())
-    //      DCInter.erase(PotRedefOp);
+    for (auto *PotRedefOp : RegisterValueMap.getValuesForRegisters(MI)) {
+      if (DCInter.find(PotRedefOp) != DCInter.end()) {
+        DCInter.erase(PotRedefOp);
+      }
+    }
   }
 
   // Add to DCUnion and account for redefinition
@@ -997,10 +1079,11 @@ bool PotAddrDepBeg::tryAddValueToDepChains(llvm::MachineInstr *MI,
     DCUnion.insert(InstAdd);
     Ret = true;
   } else if (MI->mayStore()) {
-    // TODO: get actual operand that is being stored
-    //    auto *PotRedefOp = I->getOperand(1);
-    //    if (DCUnion.find(PotRedefOp) != DCUnion.end())
-    //      DCUnion.erase(PotRedefOp);
+    for (auto *PotRedefOp : RegisterValueMap.getValuesForRegisters(MI)) {
+      if (DCUnion.find(PotRedefOp) != DCUnion.end()) {
+        DCUnion.erase(PotRedefOp);
+      }
+    }
   }
 
   return Ret;
@@ -1354,7 +1437,8 @@ struct BFSBBInfo {
 
 class BFSCtx {
 public:
-  BFSCtx(MachineBasicBlock *MBB) : MBB(MBB), ADBs() {}
+  BFSCtx(MachineBasicBlock *MBB)
+      : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(), RegisterValueMap() {}
 
   void runBFS();
 
@@ -1362,6 +1446,13 @@ private:
   MachineBasicBlock *MBB;
 
   DepHalfMap<PotAddrDepBeg> ADBs;
+
+  // Potential beginnings where the return value is part of the DepChain.
+  DepHalfMap<PotAddrDepBeg> ReturnedADBs;
+
+  std::shared_ptr<CallPathStack> CallPath;
+
+  RegisterValueMapping RegisterValueMap;
 
   void buildBackEdgeMap(BBtoBBSetMap *BEDsForBB, MachineFunction *MF);
 
@@ -1381,6 +1472,47 @@ private:
 
   void deleteAddrDepDCsAt(MachineBasicBlock *MBB,
                           std::unordered_set<MachineBasicBlock *> &BEDs);
+
+  void visitBasicBlock(MachineBasicBlock *MBB);
+
+  void visitInstruction(MachineInstr *MI);
+
+  void handleCallInst(MachineInstr *MI);
+
+  void handleLoadStoreInst(MachineInstr *MI);
+
+  void handleBranchInst(MachineInstr *MI);
+
+  void handleReturnInst(MachineInstr *MI);
+
+  void handleInstruction(MachineInstr *MI);
+
+  // verification methods
+
+  void handleDepAnnotations(MachineInstr *MI, StringRef Annotation);
+
+  // helper methods
+
+  unsigned recLevel() { return CallPath->size(); }
+
+  constexpr unsigned recLimit() const { return 4; }
+
+  std::string getFullPath(MachineInstr *MI, bool ViaFiles = false) {
+    return convertPathToString(ViaFiles) + getInstLocationString(MI, ViaFiles);
+  }
+
+  std::string getFullPathViaFiles(MachineInstr *MI) {
+    return convertPathToString() + getInstLocationString(MI);
+  }
+
+  std::string convertPathToString(bool ViaFiles = false) {
+    std::string PathStr{""};
+
+    for (auto &CallI : *CallPath)
+      PathStr += (getInstLocationString(CallI, ViaFiles) + "  ");
+
+    return PathStr;
+  }
 };
 
 void BFSCtx::runBFS() {
@@ -1399,7 +1531,7 @@ void BFSCtx::runBFS() {
   while (!BFSQueue.empty()) {
     auto &MBB = BFSQueue.front();
 
-    // TODO: do something with the MBB
+    // TODO: visit MBB and instructions
     errs() << "Visiting MBB " << MBB->getNumber() << "\n";
 
     std::unordered_set<MachineBasicBlock *> SuccessorsWOBackEdges{};
@@ -1420,6 +1552,147 @@ void BFSCtx::runBFS() {
     BFSQueue.pop();
   }
 }
+
+void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
+  this->MBB = MBB;
+
+  for (auto &MI : *MBB) {
+    visitInstruction(&MI);
+  }
+}
+
+void BFSCtx::visitInstruction(MachineInstr *MI) {
+  if (MI->isCall()) {
+    errs() << "call inst\n" << (int)MI->getOperand(0).getType() << "\n";
+
+    handleCallInst(MI);
+  }
+  if (MI->mayLoadOrStore()) {
+    errs() << "load/store inst\n";
+
+    handleLoadStoreInst(MI);
+  }
+  if (MI->isBranch()) {
+    errs() << "branch inst\n";
+
+    handleBranchInst(MI);
+  }
+  if (MI->isReturn()) {
+    errs() << "return inst\n";
+
+    handleReturnInst(MI);
+  }
+  handleInstruction(MI);
+}
+
+void BFSCtx::handleCallInst(MachineInstr *MI) {
+  auto *MF = MI->getParent()->getParent();
+  auto &FunctionOperand = MI->getOperand(0);
+  assert(FunctionOperand.isGlobal() && "Expected operand to be a global");
+
+  auto &MMI = MF->getMMI();
+  auto *CalledF = MF->getFunction().getParent()->getFunction(
+      FunctionOperand.getGlobal()->getName());
+  if (!CalledF) {
+    errs() << "Called function '" << FunctionOperand.getGlobal()->getName()
+           << "' not found, ignoring\n";
+    return;
+  }
+  // CalledF->dump();
+
+  auto &CalledMF = MMI.getOrCreateMachineFunction(*CalledF);
+
+  if (CalledMF.empty() || CalledF->isVarArg()) {
+    return;
+  }
+
+  if (this->recLevel() > this->recLimit()) {
+    return;
+  }
+
+  // TODO: run inter proc bfs
+}
+
+void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
+  // handle common load/store functionality
+  if (auto MDAnnotation = getLKMMAnnotation(MI); MDAnnotation) {
+    handleDepAnnotations(MI, *MDAnnotation);
+  }
+
+  std::set<MachineInstr *> Dependencies =
+      RegisterValueMap.getValuesForRegisters(MI);
+
+  if (MI->mayStore()) {
+    for (auto &ADBP : ADBs) {
+      auto &ADB = ADBP.second;
+
+      for (auto *V : Dependencies) {
+        ADB.tryAddValueToDepChains(RegisterValueMap, MI, V, V);
+      }
+    }
+  }
+  if (MI->mayLoad()) {
+    for (auto &ADBP : ADBs) {
+      auto &ADB = ADBP.second;
+
+      for (auto *V : Dependencies) {
+        ADB.tryAddValueToDepChains(RegisterValueMap, MI, V, MI);
+      }
+    }
+  }
+}
+
+void BFSCtx::handleBranchInst(MachineInstr *MI) {
+  // only for ctrl dependencies at the moment
+}
+
+void BFSCtx::handleReturnInst(MachineInstr *MI) {
+  // get values possibly stored in return register
+  std::set<MachineInstr *> ReturnDependencyVals{};
+
+  if (recLevel() == 0) {
+    return;
+  }
+
+  for (auto &ADBP : ADBs) {
+    auto &ADB = ADBP.second;
+    bool AnyBelongToDepChain = false;
+    for (auto *V : ReturnDependencyVals) {
+      AnyBelongToDepChain |= ADB.belongsToDepChain(MBB, V);
+    }
+
+    if (ReturnDependencyVals.empty() || ADB.isDepChainMapEmpty() ||
+        !ADB.isDepChainMapEmpty() || !AnyBelongToDepChain) {
+      ReturnedADBs.emplace(ADBP.first, ADB);
+      ReturnedADBs.at(ADBP.first).clearDCMap();
+    } else {
+      for (auto *V : ReturnDependencyVals) {
+        // TODO: this needs to be reworked: what happens if one dep belongs to
+        // all and next not?
+        if (ADB.belongsToSomeNotAllDepChains(MBB, V)) {
+          ADB.cannotBeFullDependencyAnymore();
+        }
+      }
+
+      ReturnedADBs.emplace(ADBP.first, ADB);
+    }
+  }
+}
+
+// this function mirrors visitInstruction and visitPhuNode from the IR checker,
+// as any instruction may function as a phi node in the backend.
+void BFSCtx::handleInstruction(MachineInstr *MI) {
+  for (auto &ADBP : ADBs) {
+    auto DependentValues = RegisterValueMap.getValuesForRegisters(MI);
+    for (auto &DependentInst : DependentValues) {
+      if (!ADBP.second.tryAddValueToDepChains(RegisterValueMap, MI, DependentInst, MI)) {
+        ADBP.second.cannotBeFullDependencyAnymore();
+      }
+    }
+  }
+}
+
+void BFSCtx::handleDepAnnotations(MachineInstr *MI, StringRef Annotation) {}
 
 void BFSCtx::buildBackEdgeMap(BBtoBBSetMap *BEDsForBB, MachineFunction *MF) {
   for (auto &MBB : *MF) {
