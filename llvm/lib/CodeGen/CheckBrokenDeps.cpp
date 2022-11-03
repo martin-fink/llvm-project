@@ -118,38 +118,65 @@ private:
   std::map<MachineBasicBlock *, std::map<Register, std::set<MachineInstr *>>>
       RegisterValueMap;
 
-  std::set<MachineInstr *> getValuesForRegister(MachineBasicBlock *MBB,
-                                                Register Reg);
+  std::set<MachineInstr *>
+  getValuesForRegister(MachineBasicBlock *MBB, Register Reg,
+                       std::set<MachineBasicBlock *> &Visited,
+                       MachineInstr *StartAt = nullptr);
 };
 
-std::set<MachineInstr *>
-RegisterValueMapping::getValuesForRegister(MachineBasicBlock *MBB,
-                                           Register Reg) {
-  auto &RegMap = RegisterValueMap[MBB];
+std::set<MachineInstr *> RegisterValueMapping::getValuesForRegister(
+    MachineBasicBlock *MBB, Register Reg,
+    std::set<MachineBasicBlock *> &Visited, MachineInstr *StartAt) {
+  assert((StartAt == nullptr || MBB == StartAt->getParent()) &&
+         "StartAt->getParent and passed MBB do not match");
 
-  // check if we already computed this
-  if (auto Val = RegMap.find(Reg); Val != RegMap.end()) {
-    return Val->second;
+  // already visited this basic block, return
+  if (Visited.find(MBB) != Visited.end()) {
+    return {};
   }
 
-  // if not, we walk the basic black backwards and check for a write to Reg
-  for (auto It = MBB->rbegin(); It != MBB->rend(); ++It) {
+  Visited.insert(MBB);
+
+  // for now, don't chache register values
+  // this might be good idea for future optimizations
+  // the problem is that we need to consider that there might be multiple
+  // writes to a register in a basic block -- how do we handle this?
+
+  // auto &RegMap = RegisterValueMap[MBB];
+  // if (StartAt == nullptr) {
+  //   // check if we already computed this
+  //   if (auto Val = RegMap.find(Reg); Val != RegMap.end()) {
+  //     return Val->second;
+  //   }
+  // }
+
+  auto It = MBB->rbegin();
+  if (StartAt != nullptr) {
+    // walk until we reach StartAt
+    while (It != MBB->rend() && It != StartAt) {
+      ++It;
+    }
+  }
+
+  while (It != MBB->rend()) {
     // instruction defines register, it is the only instruction that should be
     // returned
     if (It->definesRegister(Reg)) {
-      RegMap[Reg] = {&*It};
-      return {&*It};
+      // RegMap[Reg] = {&*It};
+      return {&(*It)};
     }
+
+    ++It;
   }
 
   // register was not defined in this, we need to look it up in the predecessors
   std::set<MachineInstr *> Result{};
 
   for (auto &Pred : MBB->predecessors()) {
-    auto PredResult = getValuesForRegister(Pred, Reg);
+    auto PredResult = getValuesForRegister(Pred, Reg, Visited);
     Result.insert(PredResult.begin(), PredResult.end());
   }
-  RegMap[Reg] = Result;
+  // RegMap[Reg] = Result;
 
   // TODO: handle register arguments
   // for this we need to check all argument registers for the current
@@ -163,7 +190,9 @@ RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
   std::set<MachineInstr *> Deps{};
   for (auto Op : MI->operands()) {
     if (Op.isReg() && MI->readsRegister(Op.getReg())) {
-      auto DepsForReg = getValuesForRegister(MI->getParent(), Op.getReg());
+      std::set<MachineBasicBlock *> Visited;
+      auto DepsForReg =
+          getValuesForRegister(MI->getParent(), Op.getReg(), Visited, MI);
       Deps.insert(DepsForReg.begin(), DepsForReg.end());
     }
   }
@@ -1438,7 +1467,8 @@ struct BFSBBInfo {
 class BFSCtx {
 public:
   BFSCtx(MachineBasicBlock *MBB)
-      : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(), RegisterValueMap() {}
+      : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(new CallPathStack()),
+        RegisterValueMap() {}
 
   void runBFS();
 
@@ -1533,6 +1563,7 @@ void BFSCtx::runBFS() {
 
     // TODO: visit MBB and instructions
     errs() << "Visiting MBB " << MBB->getNumber() << "\n";
+    visitBasicBlock(MBB);
 
     std::unordered_set<MachineBasicBlock *> SuccessorsWOBackEdges{};
 
@@ -1685,7 +1716,8 @@ void BFSCtx::handleInstruction(MachineInstr *MI) {
   for (auto &ADBP : ADBs) {
     auto DependentValues = RegisterValueMap.getValuesForRegisters(MI);
     for (auto &DependentInst : DependentValues) {
-      if (!ADBP.second.tryAddValueToDepChains(RegisterValueMap, MI, DependentInst, MI)) {
+      if (!ADBP.second.tryAddValueToDepChains(RegisterValueMap, MI,
+                                              DependentInst, MI)) {
         ADBP.second.cannotBeFullDependencyAnymore();
       }
     }
