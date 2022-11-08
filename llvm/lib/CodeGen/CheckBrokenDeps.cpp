@@ -1,5 +1,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -22,7 +23,10 @@
 #include "llvm/Pass.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <list>
+#include <memory>
 #include <optional>
 #include <queue>
 #include <string>
@@ -32,6 +36,7 @@
 using namespace llvm;
 
 namespace {
+#define DEBUG_TYPE "lkmm-dep-checker-backend"
 
 using IDReMap =
     std::unordered_map<std::string, std::unordered_set<std::string>>;
@@ -59,7 +64,7 @@ using BBtoBBSetMap =
 
 std::optional<StringRef> getLKMMAnnotation(MachineInstr *MI) {
   MDNode *MDN = MI->getPCSections();
-  if (!MDN || MDN->getNumOperands()) {
+  if (!MDN || !MDN->getNumOperands()) {
     return {};
   }
 
@@ -69,12 +74,6 @@ std::optional<StringRef> getLKMMAnnotation(MachineInstr *MI) {
   }
 
   return MD->getString();
-}
-
-bool hasAnnotation(MachineInstr *MI, std::string &A) {
-  auto PCAnnotation = getLKMMAnnotation(MI);
-
-  return PCAnnotation && PCAnnotation == A;
 }
 
 std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
@@ -92,6 +91,22 @@ std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
   }
 
   return MI->getParent()->getParent()->getName().str() + LAndC;
+}
+
+MachineFunction &getMachineFunctionFromCall(MachineInstr *MI) {
+  assert(
+      MI->isCall() &&
+      "Expected getMachineFunctionFromCall to be called on a call instruction");
+
+  auto *MF = MI->getParent()->getParent();
+  auto &FunctionOperand = MI->getOperand(0);
+  assert(FunctionOperand.isGlobal() && "Expected operand to be a global");
+
+  auto &MMI = MF->getMMI();
+  auto *CalledF = MF->getFunction().getParent()->getFunction(
+      FunctionOperand.getGlobal()->getName());
+
+  return MMI.getOrCreateMachineFunction(*CalledF);
 }
 
 std::string getCalledFunctionName(MachineInstr *MI) {
@@ -204,7 +219,6 @@ RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
   return Deps;
 }
 
-// // //<editor-fold desc="Dependency half classes">
 class DepHalf {
 public:
   enum DepKind {
@@ -666,6 +680,72 @@ bool PotAddrDepBeg::depChainsShareValue(
   return true;
 }
 
+class VerDepHalf : public DepHalf {
+public:
+  enum BrokenByType { BrokenDC, ParToFull };
+
+  void setBrokenBy(BrokenByType BB) { BrokenBy = BB; }
+
+  std::string getBrokenBy() {
+    switch (BrokenBy) {
+    case BrokenDC:
+      return "by breaking the dependency chain";
+    case ParToFull:
+      return "by converting a partial dependency to a full dependency";
+    }
+  }
+
+  std::string const &getParsedDepHalfID() const { return ParsedDepHalfID; }
+
+  std::string const &getParsedpathTOViaFiles() const {
+    return ParsedPathToViaFiles;
+  }
+
+  MachineInstr *const &getInst() const { return MI; };
+
+  virtual ~VerDepHalf(){};
+
+  static bool classof(const DepHalf *VDH) {
+    return VDH->getKind() >= DK_VerAddrBeg && VDH->getKind() <= DK_VerCtrlEnd;
+  }
+
+  std::string const &getParsedID() const { return ParsedID; }
+
+protected:
+  VerDepHalf(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
+             std::string PathToViaFiles, std::string ParsedDepHalfID,
+             std::string ParsedPathToViaFiles, DepKind Kind)
+      : DepHalf(MI, DepHalfID, PathToViaFiles, Kind), ParsedID(ParsedID),
+        ParsedDepHalfID(ParsedDepHalfID), ParsedPathToViaFiles{
+                                              ParsedPathToViaFiles} {}
+
+private:
+  // Shows how this dependency got broken
+  BrokenByType BrokenBy;
+
+  // The ID which identifies the two metadata annotations for this dependency.
+  const std::string ParsedID;
+
+  // The PathTo which was attached to the metadata annotation, i.e. the
+  // path to I in unoptimised IR.
+  const std::string ParsedDepHalfID;
+
+  const std::string ParsedPathToViaFiles;
+};
+
+class VerAddrDepBeg : public VerDepHalf {
+public:
+  VerAddrDepBeg(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
+                std::string PathToViaFiles, std::string ParsedPathTo,
+                std::string ParsedPathToViaFiles)
+      : VerDepHalf(MI, ParsedID, DepHalfID, PathToViaFiles, ParsedPathTo,
+                   ParsedPathToViaFiles, DK_VerAddrBeg) {}
+
+  static bool classof(const DepHalf *VDH) {
+    return VDH->getKind() == DK_VerAddrBeg;
+  }
+};
+
 void findMachineFunctionBackedges(
     const MachineFunction &MF,
     SmallVectorImpl<std::pair<const MachineBasicBlock *,
@@ -716,6 +796,28 @@ void findMachineFunctionBackedges(
   } while (!VisitStack.empty());
 }
 
+class VerAddrDepEnd : public VerDepHalf {
+public:
+  VerAddrDepEnd(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
+                std::string PathToViaFiles, std::string ParsedDepHalfID,
+                std::string ParsedPathToViaFiles, bool ParsedFDep)
+      : VerDepHalf(MI, ParsedID, DepHalfID, PathToViaFiles, ParsedDepHalfID,
+                   ParsedPathToViaFiles, DK_VerAddrEnd),
+        ParsedFDep(ParsedFDep) {}
+
+  const bool &getParsedFullDep() const { return ParsedFDep; }
+
+  static bool classof(const DepHalf *VDH) {
+    return VDH->getKind() == DK_VerAddrEnd;
+  }
+
+private:
+  // Denotes whether the address dependency was annotated as a full dependency
+  // or a partial dependency. The value is obtained from the metadata
+  // annotation.
+  const bool ParsedFDep;
+};
+
 struct BFSBBInfo {
   // The BB the two fields below relate to.
   MachineBasicBlock *MBB;
@@ -732,11 +834,18 @@ struct BFSBBInfo {
       : MBB(MBB), MaxHits(MaxHits), CurrentHits(0) {}
 };
 
+using InterprocBFSRes = DepHalfMap<PotAddrDepBeg>;
+
 class BFSCtx {
 public:
-  BFSCtx(MachineBasicBlock *MBB)
+  BFSCtx(MachineBasicBlock *MBB,
+         std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs,
+         std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs,
+         std::shared_ptr<IDReMap> RemappedIDs,
+         std::shared_ptr<VerIDSet> VerifiedIDs)
       : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(new CallPathStack()),
-        RegisterValueMap() {}
+        RegisterValueMap(), BrokenADBs(BrokenADBs), BrokenADEs(BrokenADEs),
+        RemappedIDs(RemappedIDs), VerifiedIDs(VerifiedIDs) {}
 
   void runBFS();
 
@@ -785,9 +894,70 @@ private:
 
   void handleInstruction(MachineInstr *MI);
 
-  // verification methods
+  bool areAllFunctionArgsPartOfDepChain(
+      PotAddrDepBeg &ADB, MachineInstr *CallInstr,
+      std::unordered_set<InstIdentifier> &DependentArgs);
+
+  void handleDependentFunctionArgs(MachineInstr *CallInstr,
+                                   MachineBasicBlock *MBB);
+
+  void prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr);
+
+  InterprocBFSRes runInterprocBFS(MachineBasicBlock *FirstMBB,
+                                  MachineInstr *CallInstr);
+
+  // verification methods and properties
+
+  // Contains all unverified address dependency beginning annotations.
+  // TODO: can this be a reference?
+  std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs;
+  // Contains all unverified address dependency ending annotations.
+  std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs;
+
+  // All remapped IDs which were discovered from the current root function.
+  std::shared_ptr<IDReMap> RemappedIDs;
+
+  // Contains all IDs which have been verified in the current module.
+  std::shared_ptr<VerIDSet> VerifiedIDs;
 
   void handleDepAnnotations(MachineInstr *MI, StringRef Annotation);
+
+  void parseDepHalfString(StringRef Annot,
+                          SmallVectorImpl<std::string> &AnnotData);
+
+  bool handleAddrDepID(std::string const &ID, MachineInstr *MI,
+                       std::string &ParsedDepHalfID,
+                       std::string &ParsedPathToViaFiles, bool ParsedFullDep);
+
+  void updateID(std::string &ID) {
+    if (RemappedIDs->find(ID) != RemappedIDs->end()) {
+      RemappedIDs->emplace(ID, std::unordered_set<std::string>{ID + "-#1"});
+      ID += "-#1";
+    } else {
+      auto S = RemappedIDs->at(ID).size();
+      RemappedIDs->at(ID).insert(ID + "-#" + std::to_string(S + 1));
+      ID += "-#" + std::to_string(S + 1);
+    }
+  }
+
+  void markIDAsVerified(std::string &ParsedID) {
+    auto DelID = [](auto &ID, auto &Bs, auto &Es, auto &RemappedIDs) {
+      Bs->erase(ID);
+      Es->erase(ID);
+
+      if (RemappedIDs->find(ID) != RemappedIDs->end()) {
+        for (auto const &RemappedID : RemappedIDs->at(ID)) {
+          Bs->erase(RemappedID);
+          Es->erase(RemappedID);
+        }
+      }
+    };
+
+    DelID(ParsedID, BrokenADBs, BrokenADEs, RemappedIDs);
+
+    VerifiedIDs->insert(ParsedID);
+    RemappedIDs->erase(ParsedID);
+  }
 
   // helper methods
 
@@ -811,9 +981,14 @@ private:
 
     return PathStr;
   }
+
+  std::string buildInlineString(MachineInstr *MI);
 };
 
 void BFSCtx::runBFS() {
+  LLVM_DEBUG(dbgs() << "Running BFS on machine function "
+                    << MBB->getParent()->getName().str() << "\n";);
+
   BBtoBBSetMap BEDsForBB;
 
   buildBackEdgeMap(&BEDsForBB, MBB->getParent());
@@ -829,8 +1004,6 @@ void BFSCtx::runBFS() {
   while (!BFSQueue.empty()) {
     auto &MBB = BFSQueue.front();
 
-    // TODO: visit MBB and instructions
-    errs() << "Visiting MBB " << MBB->getNumber() << "\n";
     visitBasicBlock(MBB);
 
     std::unordered_set<MachineBasicBlock *> SuccessorsWOBackEdges{};
@@ -852,7 +1025,64 @@ void BFSCtx::runBFS() {
   }
 }
 
+bool BFSCtx::areAllFunctionArgsPartOfDepChain(
+    PotAddrDepBeg &ADB, MachineInstr *CallInstr,
+    std::unordered_set<InstIdentifier> &DependentArgs) {
+  bool FDep = ADB.canBeFullDependency();
+
+  if (!ADB.areAllDepChainsAt(MBB)) {
+    FDep = false;
+  }
+
+  auto &CalledMF = getMachineFunctionFromCall(CallInstr);
+  auto &CalledF = CalledMF.getFunction();
+
+  for (unsigned I = 0; I < CalledF.arg_size(); ++I) {
+    // TODO: somehow get the register for the argument
+    //
+  }
+
+  return FDep;
+}
+
+void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
+                                         MachineBasicBlock *MBB) {
+  DepChain DependentArgs{};
+
+  for (auto &ADBP : ADBs) {
+    auto &ADB = ADBP.second;
+
+    bool FDep = areAllFunctionArgsPartOfDepChain(ADB, CallInstr, DependentArgs);
+
+    if (DependentArgs.empty()) {
+      ADB.clearDCMap();
+    } else {
+      ADB.resetDCMTo(MBB, FDep, DependentArgs);
+      ADB.addStepToPathFrom(CallInstr);
+    }
+
+    DependentArgs.clear();
+  }
+}
+
+void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr) {
+  handleDependentFunctionArgs(CallInstr, MBB);
+
+  CallPath->push_back(CallInstr);
+
+  this->MBB = MBB;
+}
+
+InterprocBFSRes BFSCtx::runInterprocBFS(MachineBasicBlock *FirstMBB,
+                                        MachineInstr *CallInstr) {
+  // TODO: implement this function
+  llvm_unreachable("not implemented yet");
+}
+
 void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
+  LLVM_DEBUG(dbgs() << "Visiting machine basic block" << MBB->getNumber()
+                    << "\n";);
+
   this->MBB = MBB;
 
   for (auto &MI : *MBB) {
@@ -861,47 +1091,34 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  if (MI->isCall()) {
-    errs() << "call inst\n" << (int)MI->getOperand(0).getType() << "\n";
+  LLVM_DEBUG(dbgs() << "Visiting instruction:\n"
+                    << "isCall: " << MI->isCall() << ", mayLoad: "
+                    << MI->mayLoad() << ", mayStore: " << MI->mayStore()
+                    << ", isBranch: " << MI->isBranch()
+                    << ", isReturn: " << MI->isReturn() << "\n"
+                    << *MI << "\n";);
 
-    handleCallInst(MI);
-  }
+  // TODO: uncomment call and return handling
+  // if (MI->isCall()) {
+  //   handleCallInst(MI);
+  // }
   if (MI->mayLoadOrStore()) {
-    errs() << "load/store inst\n";
-
     handleLoadStoreInst(MI);
   }
   if (MI->isBranch()) {
-    errs() << "branch inst\n";
-
     handleBranchInst(MI);
   }
-  if (MI->isReturn()) {
-    errs() << "return inst\n";
-
-    handleReturnInst(MI);
-  }
+  // if (MI->isReturn()) {
+  //   handleReturnInst(MI);
+  // }
   handleInstruction(MI);
 }
 
 void BFSCtx::handleCallInst(MachineInstr *MI) {
-  auto *MF = MI->getParent()->getParent();
-  auto &FunctionOperand = MI->getOperand(0);
-  assert(FunctionOperand.isGlobal() && "Expected operand to be a global");
+  auto &CalledMF = getMachineFunctionFromCall(MI);
+  auto &CalledF = CalledMF.getFunction();
 
-  auto &MMI = MF->getMMI();
-  auto *CalledF = MF->getFunction().getParent()->getFunction(
-      FunctionOperand.getGlobal()->getName());
-  if (!CalledF) {
-    errs() << "Called function '" << FunctionOperand.getGlobal()->getName()
-           << "' not found, ignoring\n";
-    return;
-  }
-  // CalledF->dump();
-
-  auto &CalledMF = MMI.getOrCreateMachineFunction(*CalledF);
-
-  if (CalledMF.empty() || CalledF->isVarArg()) {
+  if (CalledMF.empty() || CalledF.isVarArg()) {
     return;
   }
 
@@ -978,8 +1195,8 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
   }
 }
 
-// this function mirrors visitInstruction and visitPhuNode from the IR checker,
-// as any instruction may function as a phi node in the backend.
+// this function mirrors visitInstruction and visitPhiNode from the IR
+// checker, as any instruction may function as a phi node in the backend.
 void BFSCtx::handleInstruction(MachineInstr *MI) {
   for (auto &ADBP : ADBs) {
     auto DependentValues = RegisterValueMap.getValuesForRegisters(MI);
@@ -992,7 +1209,166 @@ void BFSCtx::handleInstruction(MachineInstr *MI) {
   }
 }
 
-void BFSCtx::handleDepAnnotations(MachineInstr *MI, StringRef Annotation) {}
+void BFSCtx::parseDepHalfString(StringRef Annot,
+                                SmallVectorImpl<std::string> &AnnotData) {
+  if (!Annot.consume_back(";")) {
+    return;
+  }
+
+  while (!Annot.empty()) {
+    auto P = Annot.split(",");
+    AnnotData.push_back(P.first.str());
+    Annot = P.second;
+  }
+}
+
+std::string BFSCtx::buildInlineString(MachineInstr *MI) {
+  auto InstDebugLog = MI->getDebugLoc();
+
+  if (!InstDebugLog) {
+    return "no debug loc when building inline string";
+  }
+
+  std::string InlinePath = InstDebugLog.get()->getFilename().str() + "::" +
+                           std::to_string(InstDebugLog.get()->getLine()) + ":" +
+                           std::to_string(InstDebugLog.get()->getColumn());
+
+  auto *InlinedAt = InstDebugLog->getInlinedAt();
+
+  while (InlinedAt) {
+    // InlinePath = ":" + std::to_string(InlinedAt->getColumn());
+    InlinePath += InlinedAt->getFilename().str() +
+                  "::" + std::to_string(InlinedAt->getLine()) + ":" +
+                  std::to_string(InlinedAt->getColumn());
+
+    InlinedAt = InlinedAt->getInlinedAt();
+  }
+
+  return InlinePath;
+}
+
+bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
+                             std::string &ParsedDepHalfID,
+                             std::string &ParsedPathToViaFiles,
+                             bool ParsedFullDep) {
+
+  auto Values = RegisterValueMap.getValuesForRegisters(MI);
+
+  for (auto *VCmp : Values) {
+    if (ADBs.find(ID) != ADBs.end()) {
+      auto &ADB = ADBs.at(ID);
+
+      // FIXME condition can be shortened
+      if ((ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp)) ||
+          ((!ParsedFullDep && ADB.belongsToDepChain(MBB, VCmp)))) {
+        return true;
+      }
+
+      // We only add the current annotation as a broken ending if the current
+      // BFS has seen the beginning ID. If we were to add unconditionally, we
+      // might add endings which aren't actually reachable by the corresponding.
+      // Such cases may be false positivies.
+      BrokenADEs->emplace(ID,
+                          VerAddrDepEnd(MI, ID, getFullPath(MI),
+                                        getFullPath(MI, true), ParsedDepHalfID,
+                                        ParsedPathToViaFiles, ParsedFullDep));
+
+      // Identify how the dependency got broken
+      if (!ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp))
+        BrokenADEs->at(ID).setBrokenBy(VerDepHalf::BrokenByType::ParToFull);
+      else if (!ADB.belongsToDepChain(MBB, VCmp))
+        BrokenADEs->at(ID).setBrokenBy(VerDepHalf::BrokenByType::BrokenDC);
+    }
+  }
+  return false;
+}
+
+void BFSCtx::handleDepAnnotations(MachineInstr *MI, StringRef Annotation) {
+  std::unordered_set<int> AddedEndings;
+
+  SmallVector<std::string, 5> AnnotData;
+
+  // TODO: check if splitting the annotation with this separator is correct
+  // maybe we don't need to split at all since ParseDepHalfString does it for us
+  SmallVector<StringRef, 5> SplitAnnotations;
+  Annotation.split(SplitAnnotations, '|', -1);
+  for (auto &CurrentDepHalfStr : SplitAnnotations) {
+    if (!CurrentDepHalfStr.contains("LKMMDep")) {
+      continue;
+    }
+
+    AnnotData.clear();
+
+    parseDepHalfString(CurrentDepHalfStr, AnnotData);
+
+    auto &ParsedDepHalfTypeStr = AnnotData[0];
+    auto &ParsedID = AnnotData[1];
+
+    if (VerifiedIDs->find(ParsedID) != VerifiedIDs->end()) {
+      continue;
+    }
+
+    auto &ParsedDepHalfID = AnnotData[2];
+    auto &ParsedPathToViaFiles = CurrentDepHalfStr.contains("ctrl dep begin")
+                                     ? AnnotData[4]
+                                     : AnnotData[3];
+
+    // Figure out if this is the inst we originally attached the annotation to.
+    // If it isn't, continue
+    auto InlinePath = buildInlineString(MI);
+
+    if (!InlinePath.empty() && !ParsedPathToViaFiles.empty()) {
+      if (InlinePath.length() > ParsedPathToViaFiles.length() ||
+          ParsedPathToViaFiles.compare(ParsedPathToViaFiles.length() -
+                                           InlinePath.length(),
+                                       InlinePath.length(), InlinePath) != 0) {
+        continue;
+      }
+
+      if (ParsedDepHalfTypeStr.find("begin") != std::string::npos) {
+        if (ADBs.find(ParsedID) != ADBs.end()) {
+          updateID(ParsedID);
+        }
+
+        ADBs.emplace(ParsedID, PotAddrDepBeg(MI, getFullPath(MI),
+                                             getFullPath(MI, true), MI));
+
+        if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
+          // Assume broken until proven wrong.
+          BrokenADBs->emplace(
+              ParsedID, VerAddrDepBeg(MI, ParsedID, getFullPath(MI),
+                                      getFullPath(MI, true), ParsedDepHalfID,
+                                      ParsedPathToViaFiles));
+        }
+      } else if (ParsedDepHalfTypeStr.find("end") != std::string::npos) {
+        // If we are able to verify one pair in
+        // {ORIGINAL_ID} \cup REMAPPED_IDS.at(ORIGINAL_ID) x {ORIGINAL_ID}
+        // We consider ORIGINAL_ID verified; there only exists one dependency in
+        // unoptimised IR, hence we only look for one dependency in optimised
+        // IR.
+        if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
+          bool ParsedFullDep = std::stoi(AnnotData[4]);
+
+          if (handleAddrDepID(ParsedID, MI, ParsedDepHalfID,
+                              ParsedPathToViaFiles, ParsedFullDep)) {
+            markIDAsVerified(ParsedID);
+            continue;
+          }
+
+          if (RemappedIDs->find(ParsedID) != RemappedIDs->end()) {
+            for (auto const &RemappedID : RemappedIDs->at(ParsedID)) {
+              if (handleAddrDepID(RemappedID, MI, ParsedDepHalfID,
+                                  ParsedPathToViaFiles, ParsedFullDep)) {
+                markIDAsVerified(ParsedID);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
 
 void BFSCtx::buildBackEdgeMap(BBtoBBSetMap *BEDsForBB, MachineFunction *MF) {
   for (auto &MBB : *MF) {
@@ -1067,21 +1443,113 @@ void BFSCtx::deleteAddrDepDCsAt(MachineBasicBlock *MBB,
 class CheckDepsPass : public MachineFunctionPass {
 public:
   static char ID;
-  CheckDepsPass() : MachineFunctionPass(ID) {}
+  CheckDepsPass()
+      : MachineFunctionPass(ID),
+        BrokenADBs(std::make_shared<DepHalfMap<VerAddrDepBeg>>()),
+        BrokenADEs(std::make_shared<DepHalfMap<VerAddrDepEnd>>()),
+        RemappedIDs(std::make_shared<IDReMap>()),
+        VerifiedIDs(std::make_shared<std::unordered_set<std::string>>()),
+        PrintedBrokenIDs() {}
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+private:
+  // Contains all unverified address dependency beginning annotations.
+  std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs;
+
+  std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs;
+
+  std::shared_ptr<IDReMap> RemappedIDs;
+
+  std::shared_ptr<std::unordered_set<std::string>> VerifiedIDs;
+
+  std::unordered_set<std::string> PrintedBrokenIDs;
+
+  // std::unordered_set<MachineModule *> PrintedModules;
+
+  void printBrokenDeps();
+
+  void printBrokenDep(VerDepHalf &Beg, VerDepHalf &End, const std::string &ID);
 };
 
 char CheckDepsPass::ID = 0;
 
 bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
-  errs() << "Running dep checker on function " << MF.getName().str() << "\n";
-  BFSCtx BFSCtx(&*MF.begin());
+  // auto CalleeCC = MF.getFunction().getCallingConv();
+  // SmallVector<CCValAssign, 16> ArgLocs;
+  // CCState CCInfo(CalleeCC, MF.getFunction().isVarArg(), MF, ArgLocs,
+  // MF.getFunction().getContext());
+
+  BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs, VerifiedIDs);
   BFSCtx.runBFS();
+
+  printBrokenDeps();
 
   return false;
 }
 
+void CheckDepsPass::printBrokenDeps() {
+  auto CheckDepPair = [this](auto &P, auto &E) {
+    auto ID = P.first;
+
+    // Exclude duplicate IDs by normalising them.
+    // This means we only print one representative of each equivalence class.
+    if (auto Pos = ID.find("-#"))
+      ID = ID.substr(0, Pos);
+
+    auto &VDB = P.second;
+
+    auto VDEP = E->find(ID);
+
+    if (VDEP == E->end())
+      return;
+
+    auto &VDE = VDEP->second;
+
+    if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end())
+      return;
+
+    PrintedBrokenIDs.insert(ID);
+    printBrokenDep(VDB, VDE, ID);
+  };
+
+  for (auto &VADBP : *BrokenADBs)
+    CheckDepPair(VADBP, BrokenADEs);
+}
+
+void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
+                                   const std::string &ID) {
+  std::string DepKindStr{""};
+
+  if (isa<VerAddrDepBeg>(Beg))
+    DepKindStr = "Backend Address dependency";
+  else
+    llvm_unreachable("Invalid beginning type when printing broken dependency.");
+
+  errs() << "//===--------------------------Broken "
+            "Dependency---------------------------===//\n";
+
+  errs() << DepKindStr << " with ID: " << ID << "\n\n";
+
+  errs() << "Dependency Beginning:\t" << Beg.getParsedDepHalfID() << "\n";
+  errs() << "\nPath to (via files) from annotation: "
+         << Beg.getParsedpathTOViaFiles() << "\n";
+
+  errs() << "\nDependnecy Ending:\t" << End.getParsedDepHalfID() << "\n";
+  errs() << "\nPath to (via files) from annotation: "
+         << End.getParsedpathTOViaFiles() << "\n";
+
+  if (auto *VADE = dyn_cast<VerAddrDepEnd>(&End))
+    errs() << "\nFull dependency: " << (VADE->getParsedFullDep() ? "yes" : "no")
+           << "\n";
+
+  errs() << "Broken " << End.getBrokenBy() << "\n";
+
+  errs() << "//"
+            "===---------------------------------------------------------------"
+            "-------===//\n\n";
+}
+#undef DEBUG_TYPE
 } // namespace
 
 FunctionPass *llvm::createCheckDepsPass() { return new CheckDepsPass(); }

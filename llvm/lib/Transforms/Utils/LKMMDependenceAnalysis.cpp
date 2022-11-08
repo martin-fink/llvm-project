@@ -62,7 +62,7 @@ static cl::opt<bool> InjectBugs(
     "lkmm-enable-tests",
     cl::desc("Enable the LKMM dependency checker tests. Requires the tests "
              "to be present in the source tree of the kernel being compiled"),
-    cl::Hidden, cl::init(false));
+    cl::Hidden, cl::init(true)); // TODO: change this back to false
 
 static cl::opt<bool> FullToPartialOpt(
     "enable-lkmm-addr-warnings",
