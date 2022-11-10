@@ -35,6 +35,7 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
@@ -42,6 +43,8 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cassert>
 #include <list>
 #include <queue>
 #include <string>
@@ -2400,6 +2403,14 @@ PreservedAnalyses LKMMAnnotator::run(Module &M, ModuleAnalysisManager &AM) {
 
       auto FName = F.getName();
 
+      // // TODO: remove the following code
+      // if (FName.str() == "doitlk_rr_addr_dep_begin_simple") {
+      //   AC.insertBug(&F, Instruction::Load, "dep begin");
+      //   InsertedBugs = true;
+      //   break;
+      // }
+      // continue;
+
       // Insert bugs if the BFS just annotated a testing function.
       if (FName.contains("proj_bdo_rr_addr_dep_begin") ||
           FName.contains("proj_bdo_rw_addr_dep_begin") ||
@@ -2436,11 +2447,16 @@ PreservedAnalyses LKMMAnnotator::run(Module &M, ModuleAnalysisManager &AM) {
           continue;
         }
 
+        SmallVector<MDBuilder::PCSection, 5> Annotations;
         for (auto &MDAOp : MDA->operands()) {
-          if (cast<MDString>(MDAOp.get())->getString().contains("LKMMDep:")) {
-            I.setMetadata(LLVMContext::MD_pcsections, MDB.createPCSections({{cast<MDString>(MDAOp.get())->getString(), {}}}));
+          if (auto *Annotation = dyn_cast<MDString>(MDAOp.get());
+              Annotation->getString().contains("LKMMDep:")) {
+            Annotations.push_back({Annotation->getString(), {}});
           }
         }
+
+        I.setMetadata(LLVMContext::MD_pcsections,
+                      MDB.createPCSections(Annotations));
       }
     }
   }

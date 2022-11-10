@@ -25,6 +25,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <list>
 #include <memory>
 #include <optional>
@@ -62,18 +63,20 @@ using BBtoBBSetMap =
     std::unordered_map<MachineBasicBlock *,
                        std::unordered_set<MachineBasicBlock *>>;
 
-std::optional<StringRef> getLKMMAnnotation(MachineInstr *MI) {
+SmallVector<StringRef, 5> getLKMMAnnotations(MachineInstr *MI) {
+  SmallVector<StringRef, 5> Annotations{};
   MDNode *MDN = MI->getPCSections();
-  if (!MDN || !MDN->getNumOperands()) {
-    return {};
+  if (!MDN) {
+    return Annotations;
   }
 
-  auto *MD = dyn_cast<MDString>(MDN->getOperand(0).get());
-  if (!MD) {
-    return {};
+  for (const MDOperand &MDO : MDN->operands()) {
+    if (auto *MD = dyn_cast<MDString>(MDO.get())) {
+      Annotations.push_back(MD->getString());
+    }
   }
 
-  return MD->getString();
+  return Annotations;
 }
 
 std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
@@ -920,7 +923,8 @@ private:
   // Contains all IDs which have been verified in the current module.
   std::shared_ptr<VerIDSet> VerifiedIDs;
 
-  void handleDepAnnotations(MachineInstr *MI, StringRef Annotation);
+  void handleDepAnnotations(MachineInstr *MI,
+                            SmallVector<StringRef, 5> Annotations);
 
   void parseDepHalfString(StringRef Annot,
                           SmallVectorImpl<std::string> &AnnotData);
@@ -1096,7 +1100,7 @@ void BFSCtx::visitInstruction(MachineInstr *MI) {
                     << MI->mayLoad() << ", mayStore: " << MI->mayStore()
                     << ", isBranch: " << MI->isBranch()
                     << ", isReturn: " << MI->isReturn() << "\n"
-                    << *MI << "\n";);
+                    << *MI << "\n");
 
   // TODO: uncomment call and return handling
   // if (MI->isCall()) {
@@ -1131,9 +1135,7 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
 
 void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
   // handle common load/store functionality
-  if (auto MDAnnotation = getLKMMAnnotation(MI); MDAnnotation) {
-    handleDepAnnotations(MI, *MDAnnotation);
-  }
+  handleDepAnnotations(MI, getLKMMAnnotations(MI));
 
   std::set<MachineInstr *> Dependencies =
       RegisterValueMap.getValuesForRegisters(MI);
@@ -1283,16 +1285,13 @@ bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
   return false;
 }
 
-void BFSCtx::handleDepAnnotations(MachineInstr *MI, StringRef Annotation) {
+void BFSCtx::handleDepAnnotations(MachineInstr *MI,
+                                  SmallVector<StringRef, 5> Annotations) {
   std::unordered_set<int> AddedEndings;
 
   SmallVector<std::string, 5> AnnotData;
 
-  // TODO: check if splitting the annotation with this separator is correct
-  // maybe we don't need to split at all since ParseDepHalfString does it for us
-  SmallVector<StringRef, 5> SplitAnnotations;
-  Annotation.split(SplitAnnotations, '|', -1);
-  for (auto &CurrentDepHalfStr : SplitAnnotations) {
+  for (auto &CurrentDepHalfStr : Annotations) {
     if (!CurrentDepHalfStr.contains("LKMMDep")) {
       continue;
     }
@@ -1480,6 +1479,7 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
   // CCState CCInfo(CalleeCC, MF.getFunction().isVarArg(), MF, ArgLocs,
   // MF.getFunction().getContext());
 
+  LLVM_DEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n");
   BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs, VerifiedIDs);
   BFSCtx.runBFS();
 
@@ -1522,7 +1522,7 @@ void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
   std::string DepKindStr{""};
 
   if (isa<VerAddrDepBeg>(Beg))
-    DepKindStr = "Backend Address dependency";
+    DepKindStr = "Backend address dependency";
   else
     llvm_unreachable("Invalid beginning type when printing broken dependency.");
 
