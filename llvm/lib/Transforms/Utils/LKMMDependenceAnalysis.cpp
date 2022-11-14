@@ -2434,33 +2434,6 @@ PreservedAnalyses LKMMAnnotator::run(Module &M, ModuleAnalysisManager &AM) {
     }
   }
 
-  // copying metadata into pc sections for backend checks
-  MDBuilder MDB(M.getContext());
-  for (auto &F : M) {
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        // TODO: remove this
-        // I.addAnnotationMetadata(ADBStr);
-
-        auto *MDA = I.getMetadata(LLVMContext::MD_annotation);
-        if (!MDA) {
-          continue;
-        }
-
-        SmallVector<MDBuilder::PCSection, 5> Annotations;
-        for (auto &MDAOp : MDA->operands()) {
-          if (auto *Annotation = dyn_cast<MDString>(MDAOp.get());
-              Annotation->getString().contains("LKMMDep:")) {
-            Annotations.push_back({Annotation->getString(), {}});
-          }
-        }
-
-        I.setMetadata(LLVMContext::MD_pcsections,
-                      MDB.createPCSections(Annotations));
-      }
-    }
-  }
-
   return InsertedBugs ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
@@ -2485,6 +2458,30 @@ PreservedAnalyses LKMMVerifier::run(Module &M, ModuleAnalysisManager &AM) {
   onlyPrintShortestDep();
 
   printBrokenDeps();
+
+  // copying metadata into pc sections for backend checks
+  MDBuilder MDB(M.getContext());
+  for (auto &F : M) {
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        auto *MDA = I.getMetadata(LLVMContext::MD_annotation);
+        if (!MDA) {
+          continue;
+        }
+
+        SmallVector<MDBuilder::PCSection, 5> Annotations;
+        for (auto &MDAOp : MDA->operands()) {
+          if (auto *Annotation = dyn_cast<MDString>(MDAOp.get());
+              Annotation->getString().contains("LKMMDep:")) {
+            Annotations.push_back({Annotation->getString(), {}});
+          }
+        }
+
+        I.setMetadata(LLVMContext::MD_pcsections,
+                      MDB.createPCSections(Annotations));
+      }
+    }
+  }
 
   return PreservedAnalyses::all();
 }
