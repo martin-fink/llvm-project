@@ -235,6 +235,11 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
   assert((StartAt == nullptr || MBB == StartAt->getParent()) &&
          "StartAt->getParent and passed MBB do not match");
 
+  // if we are looking up values for the zero register, return an empty set
+  if (Reg == AArch64::XZR || Reg == AArch64::WZR) {
+    return {};
+  }
+
   // already visited this basic block, return
   if (Visited.find(MBB) != Visited.end()) {
     return {};
