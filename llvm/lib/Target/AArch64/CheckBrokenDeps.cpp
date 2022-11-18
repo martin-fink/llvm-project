@@ -116,7 +116,7 @@ raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val) {
 }
 
 // define an array containing the arm argument registers
-static const std::array<Register, 8> ARMArgRegs = {
+static const std::array<Register, 8> AArch64ArgRegs = {
     AArch64::X0, AArch64::X1, AArch64::X2, AArch64::X3,
     AArch64::X4, AArch64::X5, AArch64::X6, AArch64::X7};
 
@@ -288,9 +288,9 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
   // TODO: check if we can compare blocks just by their number
   if (MF->front().getNumber() == MBB->getNumber() &&
       MF->getRegInfo().isArgumentRegister(*MF, Reg)) {
-    const auto *ArgReg = std::find(ARMArgRegs.begin(), ARMArgRegs.end(), Reg);
-    if (ArgReg != ARMArgRegs.end() &&
-        std::distance(ARMArgRegs.begin(), ArgReg) <
+    const auto *ArgReg = std::find(AArch64ArgRegs.begin(), AArch64ArgRegs.end(), Reg);
+    if (ArgReg != AArch64ArgRegs.end() &&
+        std::distance(AArch64ArgRegs.begin(), ArgReg) <
             static_cast<long>(MF->getFunction().arg_size())) {
       // this is an argument register used for this function
       return {*ArgReg};
@@ -1163,13 +1163,13 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
   auto &CalledF = CalledMF->getFunction();
 
   // TODO: this should be handled in the future
-  if (CalledF.arg_size() > ARMArgRegs.size()) {
+  if (CalledF.arg_size() > AArch64ArgRegs.size()) {
     errs() << "Cannot handle functions with arguments passed over the stack.\n";
     return false;
   }
 
-  for (unsigned I = 0; I < CalledF.arg_size() && I < ARMArgRegs.size(); ++I) {
-    auto Reg = ARMArgRegs[I];
+  for (unsigned I = 0; I < CalledF.arg_size() && I < AArch64ArgRegs.size(); ++I) {
+    auto Reg = AArch64ArgRegs[I];
     auto Values = RegisterValueMap.getValuesForRegister(Reg, CallInstr);
 
     auto BelongsToDepChain =
