@@ -226,13 +226,13 @@ private:
   std::set<MachineValue>
   getValuesForRegister(MachineBasicBlock *MBB, Register Reg,
                        std::set<MachineBasicBlock *> &Visited,
-                       MachineInstr *StartAt = nullptr);
+                       MachineInstr *StartBefore = nullptr);
 };
 
 std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
     MachineBasicBlock *MBB, Register Reg,
-    std::set<MachineBasicBlock *> &Visited, MachineInstr *StartAt) {
-  assert((StartAt == nullptr || MBB == StartAt->getParent()) &&
+    std::set<MachineBasicBlock *> &Visited, MachineInstr *StartBefore) {
+  assert((StartBefore == nullptr || MBB == StartBefore->getParent()) &&
          "StartAt->getParent and passed MBB do not match");
 
   // if we are looking up values for the zero register, return an empty set
@@ -261,14 +261,16 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
   // }
 
   auto It = MBB->rbegin();
-  if (StartAt != nullptr) {
+  if (StartBefore != nullptr) {
     // walk until we reach StartAt
-    while (It != MBB->rend() && It != StartAt) {
+    while (It != MBB->rend() && It != StartBefore) {
       ++It;
     }
 
-    // walk one further than StartAt
-    ++It;
+    if (It != MBB->rend()) {
+      // walk one further than StartAt
+      ++It;
+    }
   }
 
   for (; It != MBB->rend(); ++It) {
