@@ -956,11 +956,11 @@ using InterprocBFSRes = DepHalfMap<PotAddrDepBeg>;
 class BFSCtx {
 public:
   BFSCtx(MachineBasicBlock *MBB,
-         std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs,
-         std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs,
-         std::shared_ptr<IDReMap> RemappedIDs,
-         std::shared_ptr<VerIDSet> VerifiedIDs)
-      : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(new CallPathStack()),
+         DepHalfMap<VerAddrDepBeg> &BrokenADBs,
+         DepHalfMap<VerAddrDepEnd> &BrokenADEs,
+         IDReMap &RemappedIDs,
+         VerIDSet &VerifiedIDs)
+      : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(CallPathStack()),
         RegisterValueMap(), BrokenADBs(BrokenADBs), BrokenADEs(BrokenADEs),
         RemappedIDs(RemappedIDs), VerifiedIDs(VerifiedIDs) {}
 
@@ -980,7 +980,7 @@ private:
   // Potential beginnings where the return value is part of the DepChain.
   DepHalfMap<PotAddrDepBeg> ReturnedADBs;
 
-  std::shared_ptr<CallPathStack> CallPath;
+  CallPathStack CallPath;
 
   RegisterValueMapping RegisterValueMap;
 
@@ -1034,15 +1034,15 @@ private:
 
   // Contains all unverified address dependency beginning annotations.
   // TODO: can this be a reference?
-  std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs;
+  DepHalfMap<VerAddrDepBeg> &BrokenADBs;
   // Contains all unverified address dependency ending annotations.
-  std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs;
+  DepHalfMap<VerAddrDepEnd> &BrokenADEs;
 
   // All remapped IDs which were discovered from the current root function.
-  std::shared_ptr<IDReMap> RemappedIDs;
+  IDReMap &RemappedIDs;
 
   // Contains all IDs which have been verified in the current module.
-  std::shared_ptr<VerIDSet> VerifiedIDs;
+  VerIDSet &VerifiedIDs;
 
   void handleDepAnnotations(MachineInstr *MI,
                             SmallVector<StringRef, 5> Annotations);
@@ -1055,38 +1055,38 @@ private:
                        std::string &ParsedPathToViaFiles, bool ParsedFullDep);
 
   void updateID(std::string &ID) {
-    if (RemappedIDs->find(ID) != RemappedIDs->end()) {
-      RemappedIDs->emplace(ID, std::unordered_set<std::string>{ID + "-#1"});
+    if (RemappedIDs.find(ID) != RemappedIDs.end()) {
+      RemappedIDs.emplace(ID, std::unordered_set<std::string>{ID + "-#1"});
       ID += "-#1";
     } else {
-      auto S = RemappedIDs->at(ID).size();
-      RemappedIDs->at(ID).insert(ID + "-#" + std::to_string(S + 1));
+      auto S = RemappedIDs.at(ID).size();
+      RemappedIDs.at(ID).insert(ID + "-#" + std::to_string(S + 1));
       ID += "-#" + std::to_string(S + 1);
     }
   }
 
   void markIDAsVerified(std::string &ParsedID) {
     auto DelID = [](auto &ID, auto &Bs, auto &Es, auto &RemappedIDs) {
-      Bs->erase(ID);
-      Es->erase(ID);
+      Bs.erase(ID);
+      Es.erase(ID);
 
-      if (RemappedIDs->find(ID) != RemappedIDs->end()) {
-        for (auto const &RemappedID : RemappedIDs->at(ID)) {
-          Bs->erase(RemappedID);
-          Es->erase(RemappedID);
+      if (RemappedIDs.find(ID) != RemappedIDs.end()) {
+        for (auto const &RemappedID : RemappedIDs.at(ID)) {
+          Bs.erase(RemappedID);
+          Es.erase(RemappedID);
         }
       }
     };
 
     DelID(ParsedID, BrokenADBs, BrokenADEs, RemappedIDs);
 
-    VerifiedIDs->insert(ParsedID);
-    RemappedIDs->erase(ParsedID);
+    VerifiedIDs.insert(ParsedID);
+    RemappedIDs.erase(ParsedID);
   }
 
   // helper methods
 
-  unsigned recLevel() { return CallPath->size(); }
+  unsigned recLevel() { return CallPath.size(); }
 
   constexpr unsigned recLimit() const { return 4; }
 
@@ -1101,7 +1101,7 @@ private:
   std::string convertPathToString(bool ViaFiles = false) {
     std::string PathStr{""};
 
-    for (auto &CallI : *CallPath)
+    for (auto &CallI : CallPath)
       PathStr += (getInstLocationString(CallI, ViaFiles) + "  ");
 
     return PathStr;
@@ -1228,7 +1228,7 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
 void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr) {
   handleDependentFunctionArgs(CallInstr, MBB);
 
-  CallPath->push_back(CallInstr);
+  CallPath.push_back(CallInstr);
 
   this->MBB = MBB;
 }
@@ -1463,16 +1463,16 @@ bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
       // BFS has seen the beginning ID. If we were to add unconditionally, we
       // might add endings which aren't actually reachable by the corresponding.
       // Such cases may be false positivies.
-      BrokenADEs->emplace(ID,
+      BrokenADEs.emplace(ID,
                           VerAddrDepEnd(MI, ID, getFullPath(MI),
                                         getFullPath(MI, true), ParsedDepHalfID,
                                         ParsedPathToViaFiles, ParsedFullDep));
 
       // Identify how the dependency got broken
       if (!ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp))
-        BrokenADEs->at(ID).setBrokenBy(VerDepHalf::BrokenByType::ParToFull);
+        BrokenADEs.at(ID).setBrokenBy(VerDepHalf::BrokenByType::ParToFull);
       else if (!ADB.belongsToDepChain(MBB, VCmp))
-        BrokenADEs->at(ID).setBrokenBy(VerDepHalf::BrokenByType::BrokenDC);
+        BrokenADEs.at(ID).setBrokenBy(VerDepHalf::BrokenByType::BrokenDC);
     }
   }
   return false;
@@ -1496,7 +1496,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
     auto &ParsedDepHalfTypeStr = AnnotData[0];
     auto &ParsedID = AnnotData[1];
 
-    if (VerifiedIDs->find(ParsedID) != VerifiedIDs->end()) {
+    if (VerifiedIDs.find(ParsedID) != VerifiedIDs.end()) {
       continue;
     }
 
@@ -1527,7 +1527,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
 
         if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
           // Assume broken until proven wrong.
-          BrokenADBs->emplace(
+          BrokenADBs.emplace(
               ParsedID, VerAddrDepBeg(MI, ParsedID, getFullPath(MI),
                                       getFullPath(MI, true), ParsedDepHalfID,
                                       ParsedPathToViaFiles));
@@ -1547,8 +1547,8 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
             continue;
           }
 
-          if (RemappedIDs->find(ParsedID) != RemappedIDs->end()) {
-            for (auto const &RemappedID : RemappedIDs->at(ParsedID)) {
+          if (RemappedIDs.find(ParsedID) != RemappedIDs.end()) {
+            for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
               if (handleAddrDepID(RemappedID, MI, ParsedDepHalfID,
                                   ParsedPathToViaFiles, ParsedFullDep)) {
                 markIDAsVerified(ParsedID);
@@ -1637,23 +1637,23 @@ public:
   static char ID;
   CheckDepsPass()
       : MachineFunctionPass(ID),
-        BrokenADBs(std::make_shared<DepHalfMap<VerAddrDepBeg>>()),
-        BrokenADEs(std::make_shared<DepHalfMap<VerAddrDepEnd>>()),
-        RemappedIDs(std::make_shared<IDReMap>()),
-        VerifiedIDs(std::make_shared<std::unordered_set<std::string>>()),
+        BrokenADBs(DepHalfMap<VerAddrDepBeg>()),
+        BrokenADEs(DepHalfMap<VerAddrDepEnd>()),
+        RemappedIDs(IDReMap()),
+        VerifiedIDs(std::unordered_set<std::string>()),
         PrintedBrokenIDs() {}
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
   // Contains all unverified address dependency beginning annotations.
-  std::shared_ptr<DepHalfMap<VerAddrDepBeg>> BrokenADBs;
+  DepHalfMap<VerAddrDepBeg> BrokenADBs;
 
-  std::shared_ptr<DepHalfMap<VerAddrDepEnd>> BrokenADEs;
+  DepHalfMap<VerAddrDepEnd> BrokenADEs;
 
-  std::shared_ptr<IDReMap> RemappedIDs;
+  IDReMap RemappedIDs;
 
-  std::shared_ptr<std::unordered_set<std::string>> VerifiedIDs;
+  std::unordered_set<std::string> VerifiedIDs;
 
   std::unordered_set<std::string> PrintedBrokenIDs;
 
@@ -1699,9 +1699,9 @@ void CheckDepsPass::printBrokenDeps() {
 
     auto &VDB = P.second;
 
-    auto VDEP = E->find(ID);
+    auto VDEP = E.find(ID);
 
-    if (VDEP == E->end())
+    if (VDEP == E.end())
       return;
 
     auto &VDE = VDEP->second;
@@ -1713,7 +1713,7 @@ void CheckDepsPass::printBrokenDeps() {
     printBrokenDep(VDB, VDE, ID);
   };
 
-  for (auto &VADBP : *BrokenADBs)
+  for (auto &VADBP : BrokenADBs)
     CheckDepPair(VADBP, BrokenADEs);
 }
 
