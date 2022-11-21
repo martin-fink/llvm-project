@@ -23,6 +23,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCRegister.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Casting.h"
@@ -115,7 +116,6 @@ raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val) {
   return Os;
 }
 
-// define an array containing the arm argument registers
 static const std::array<Register, 8> AArch64ArgRegs = {
     AArch64::X0, AArch64::X1, AArch64::X2, AArch64::X3,
     AArch64::X4, AArch64::X5, AArch64::X6, AArch64::X7};
@@ -271,15 +271,19 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
     ++It;
   }
 
-  while (It != MBB->rend()) {
+  for (; It != MBB->rend(); ++It) {
     // instruction defines register, it is the only instruction that should be
     // returned
-    if (It->definesRegister(Reg)) {
-      // RegMap[Reg] = {&*It};
-      return {&(*It)};
-    }
+    // TODO: handle subregisters
 
-    ++It;
+    auto *TRI = MBB->getParent()->getSubtarget().getRegisterInfo();
+
+    for (MCSubRegIterator SubRegs(Reg, TRI, true); SubRegs.isValid();
+         ++SubRegs) {
+      if (It->definesRegister(*SubRegs)) {
+        return {&*It};
+      }
+    }
   }
 
   // if we are in the entry block for this function, we also need to check if
@@ -288,7 +292,8 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
   // TODO: check if we can compare blocks just by their number
   if (MF->front().getNumber() == MBB->getNumber() &&
       MF->getRegInfo().isArgumentRegister(*MF, Reg)) {
-    const auto *ArgReg = std::find(AArch64ArgRegs.begin(), AArch64ArgRegs.end(), Reg);
+    const auto *ArgReg =
+        std::find(AArch64ArgRegs.begin(), AArch64ArgRegs.end(), Reg);
     if (ArgReg != AArch64ArgRegs.end() &&
         std::distance(AArch64ArgRegs.begin(), ArgReg) <
             static_cast<long>(MF->getFunction().arg_size())) {
@@ -1153,7 +1158,7 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     FDep = false;
   }
 
-  auto CalledMFOptional= getMachineFunctionFromCall(CallInstr);
+  auto CalledMFOptional = getMachineFunctionFromCall(CallInstr);
   if (!CalledMFOptional.has_value()) {
     errs() << "Got no machine function from call instruction.\n";
     // TODO: check if returning false is the correct response to this
@@ -1168,7 +1173,8 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     return false;
   }
 
-  for (unsigned I = 0; I < CalledF.arg_size() && I < AArch64ArgRegs.size(); ++I) {
+  for (unsigned I = 0; I < CalledF.arg_size() && I < AArch64ArgRegs.size();
+       ++I) {
     auto Reg = AArch64ArgRegs[I];
     auto Values = RegisterValueMap.getValuesForRegister(Reg, CallInstr);
 
@@ -1665,6 +1671,11 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
   // MF.getFunction().getContext());
 
   // MF.getRegInfo().getTargetRegisterInfo().
+
+  if (MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" ||
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain") {
+    errs() << "just here to set a debug breakpoint\n";
+  }
 
   LLVM_DEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n");
   BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs, VerifiedIDs);
