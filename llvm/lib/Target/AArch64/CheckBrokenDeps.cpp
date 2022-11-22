@@ -262,6 +262,7 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
          "StartAt->getParent and passed MBB do not match");
 
   // if we are looking up values for the zero register, return an empty set
+  // NOLINTNEXTLINE(misc-redundant-expression)
   if (Reg == AArch64::XZR || Reg == AArch64::WZR) {
     return {};
   }
