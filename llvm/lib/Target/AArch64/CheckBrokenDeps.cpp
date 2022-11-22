@@ -43,7 +43,18 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-// #include "../Target/AArch64/AArch64.h"
+
+// TODO: remove this
+#define MFDEBUG_ENABLED 0
+
+#if MFDEBUG_ENABLED
+#define MFDEBUG(X)                                                             \
+  do {                                                                         \
+    X                                                                          \
+  } while (0)
+#else
+#define MFDEBUG(X)
+#endif
 
 using namespace llvm;
 
@@ -66,6 +77,8 @@ public:
   MachineValue(MachineInstr *MI) : Kind(Instruction), U(MI) {}
   MachineValue(Register Reg) : Kind(RegisterArgument), U(Reg) {}
   ~MachineValue() {}
+
+  void dump() const;
 
   friend raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val);
 
@@ -102,6 +115,19 @@ public:
     }
   };
 };
+
+void MachineValue::dump() const {
+  switch (this->Kind) {
+  case Instruction:
+    this->U.MI->dump();
+    break;
+  case RegisterArgument:
+    errs() << "Register: " << this->U.Reg << "\n";
+    break;
+  }
+
+  llvm_unreachable("Invalid MachineValue kind");
+}
 
 raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val) {
   switch (Val.Kind) {
@@ -955,10 +981,8 @@ using InterprocBFSRes = DepHalfMap<PotAddrDepBeg>;
 
 class BFSCtx {
 public:
-  BFSCtx(MachineBasicBlock *MBB,
-         DepHalfMap<VerAddrDepBeg> &BrokenADBs,
-         DepHalfMap<VerAddrDepEnd> &BrokenADEs,
-         IDReMap &RemappedIDs,
+  BFSCtx(MachineBasicBlock *MBB, DepHalfMap<VerAddrDepBeg> &BrokenADBs,
+         DepHalfMap<VerAddrDepEnd> &BrokenADEs, IDReMap &RemappedIDs,
          VerIDSet &VerifiedIDs)
       : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(CallPathStack()),
         RegisterValueMap(), BrokenADBs(BrokenADBs), BrokenADEs(BrokenADEs),
@@ -1066,19 +1090,15 @@ private:
   }
 
   void markIDAsVerified(std::string &ParsedID) {
-    auto DelID = [](auto &ID, auto &Bs, auto &Es, auto &RemappedIDs) {
-      Bs.erase(ID);
-      Es.erase(ID);
+    BrokenADBs.erase(ParsedID);
+    BrokenADEs.erase(ParsedID);
 
-      if (RemappedIDs.find(ID) != RemappedIDs.end()) {
-        for (auto const &RemappedID : RemappedIDs.at(ID)) {
-          Bs.erase(RemappedID);
-          Es.erase(RemappedID);
-        }
+    if (RemappedIDs.find(ParsedID) != RemappedIDs.end()) {
+      for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
+        BrokenADBs.erase(RemappedID);
+        BrokenADEs.erase(RemappedID);
       }
-    };
-
-    DelID(ParsedID, BrokenADBs, BrokenADEs, RemappedIDs);
+    }
 
     VerifiedIDs.insert(ParsedID);
     RemappedIDs.erase(ParsedID);
@@ -1162,7 +1182,8 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
 
   auto CalledMFOptional = getMachineFunctionFromCall(CallInstr);
   if (!CalledMFOptional.has_value()) {
-    errs() << "Got no machine function from call instruction.\n";
+    LLVM_DEBUG(dbgs() << "Got no machine function from call instruction: "
+                      << *CallInstr << "\n");
     // TODO: check if returning false is the correct response to this
     return false;
   }
@@ -1247,17 +1268,16 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
   this->MBB = MBB;
 
   for (auto &MI : *MBB) {
-    visitInstruction(&MI);
+    if (!MI.isDebugInstr()) {
+      visitInstruction(&MI);
+    } else {
+      MFDEBUG(errs() << "s " << MI;);
+    }
   }
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  LLVM_DEBUG(dbgs() << "Visiting instruction:\n"
-                    << "isCall: " << MI->isCall() << ", mayLoad: "
-                    << MI->mayLoad() << ", mayStore: " << MI->mayStore()
-                    << ", isBranch: " << MI->isBranch()
-                    << ", isReturn: " << MI->isReturn() << "\n"
-                    << *MI << "\n");
+  MFDEBUG(errs() << "v " << *MI;);
 
   if (MI->isCall()) {
     handleCallInst(MI);
@@ -1277,7 +1297,8 @@ void BFSCtx::visitInstruction(MachineInstr *MI) {
 void BFSCtx::handleCallInst(MachineInstr *MI) {
   auto CalledMFOptional = getMachineFunctionFromCall(MI);
   if (!CalledMFOptional.has_value()) {
-    errs() << "Got no machine function from call instruction.\n";
+    LLVM_DEBUG(dbgs() << "Got no machine function from call instruction: "
+                      << *MI << "\n");
     return;
   }
   auto *CalledMF = *CalledMFOptional;
@@ -1464,9 +1485,9 @@ bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
       // might add endings which aren't actually reachable by the corresponding.
       // Such cases may be false positivies.
       BrokenADEs.emplace(ID,
-                          VerAddrDepEnd(MI, ID, getFullPath(MI),
-                                        getFullPath(MI, true), ParsedDepHalfID,
-                                        ParsedPathToViaFiles, ParsedFullDep));
+                         VerAddrDepEnd(MI, ID, getFullPath(MI),
+                                       getFullPath(MI, true), ParsedDepHalfID,
+                                       ParsedPathToViaFiles, ParsedFullDep));
 
       // Identify how the dependency got broken
       if (!ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp))
@@ -1489,6 +1510,8 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
       continue;
     }
 
+    MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
+
     AnnotData.clear();
 
     parseDepHalfString(CurrentDepHalfStr, AnnotData);
@@ -1497,6 +1520,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
     auto &ParsedID = AnnotData[1];
 
     if (VerifiedIDs.find(ParsedID) != VerifiedIDs.end()) {
+      MFDEBUG(errs() << "-- already verified\n";);
       continue;
     }
 
@@ -1527,6 +1551,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
 
         if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
           // Assume broken until proven wrong.
+          MFDEBUG(errs() << "-- assume broken: " << ParsedID << "\n\n";);
           BrokenADBs.emplace(
               ParsedID, VerAddrDepBeg(MI, ParsedID, getFullPath(MI),
                                       getFullPath(MI, true), ParsedDepHalfID,
@@ -1543,6 +1568,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
 
           if (handleAddrDepID(ParsedID, MI, ParsedDepHalfID,
                               ParsedPathToViaFiles, ParsedFullDep)) {
+            MFDEBUG(errs() << "-- verified " << ParsedID << "\n\n";);
             markIDAsVerified(ParsedID);
             continue;
           }
@@ -1551,6 +1577,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
             for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
               if (handleAddrDepID(RemappedID, MI, ParsedDepHalfID,
                                   ParsedPathToViaFiles, ParsedFullDep)) {
+                MFDEBUG(errs() << "-- verified " << ParsedID << "\n\n";);
                 markIDAsVerified(ParsedID);
                 break;
               }
@@ -1636,12 +1663,9 @@ class CheckDepsPass : public MachineFunctionPass {
 public:
   static char ID;
   CheckDepsPass()
-      : MachineFunctionPass(ID),
-        BrokenADBs(DepHalfMap<VerAddrDepBeg>()),
-        BrokenADEs(DepHalfMap<VerAddrDepEnd>()),
-        RemappedIDs(IDReMap()),
-        VerifiedIDs(std::unordered_set<std::string>()),
-        PrintedBrokenIDs() {}
+      : MachineFunctionPass(ID), BrokenADBs(DepHalfMap<VerAddrDepBeg>()),
+        BrokenADEs(DepHalfMap<VerAddrDepEnd>()), RemappedIDs(IDReMap()),
+        VerifiedIDs(std::unordered_set<std::string>()), PrintedBrokenIDs() {}
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -1667,41 +1691,33 @@ private:
 char CheckDepsPass::ID = 0;
 
 bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
-  // auto CalleeCC = MF.getFunction().getCallingConv();
-  // SmallVector<CCValAssign, 16> ArgLocs;
-  // CCState CCInfo(CalleeCC, MF.getFunction().isVarArg(), MF, ArgLocs,
-  // MF.getFunction().getContext());
+  if (!MFDEBUG_ENABLED ||
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" ||
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" ||
+      MF.getName().str() == "doitlk_rr_addr_dep_begin_simple") {
+    LLVM_DEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n");
+    BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs,
+                  VerifiedIDs);
+    BFSCtx.runBFS();
 
-  // MF.getRegInfo().getTargetRegisterInfo().
-
-  if (MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" ||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain") {
-    errs() << "just here to set a debug breakpoint\n";
+    printBrokenDeps();
   }
-
-  LLVM_DEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n");
-  BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs, VerifiedIDs);
-  BFSCtx.runBFS();
-
-  printBrokenDeps();
 
   return false;
 }
 
 void CheckDepsPass::printBrokenDeps() {
-  auto CheckDepPair = [this](auto &P, auto &E) {
-    auto ID = P.first;
-
+  for (auto &[ParsedID, VDB] : BrokenADBs) {
+    auto ID = ParsedID;
     // Exclude duplicate IDs by normalising them.
     // This means we only print one representative of each equivalence class.
-    if (auto Pos = ID.find("-#"))
+    if (auto Pos = ID.find("-#")) {
       ID = ID.substr(0, Pos);
+    }
 
-    auto &VDB = P.second;
+    auto VDEP = BrokenADEs.find(ID);
 
-    auto VDEP = E.find(ID);
-
-    if (VDEP == E.end())
+    if (VDEP == BrokenADEs.end())
       return;
 
     auto &VDE = VDEP->second;
@@ -1711,10 +1727,7 @@ void CheckDepsPass::printBrokenDeps() {
 
     PrintedBrokenIDs.insert(ID);
     printBrokenDep(VDB, VDE, ID);
-  };
-
-  for (auto &VADBP : BrokenADBs)
-    CheckDepPair(VADBP, BrokenADEs);
+  }
 }
 
 void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
