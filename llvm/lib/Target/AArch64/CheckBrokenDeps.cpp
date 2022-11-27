@@ -1031,8 +1031,7 @@ public:
 
   BFSCtx(BFSCtx &Ctx, MachineBasicBlock *MBB, MachineInstr *CallInstr)
       : BFSCtx(Ctx) {
-    this->RegisterValueMap = RegisterValueMapping(MBB->getParent());
-    prepareInterproc(MBB, CallInstr, Ctx.RegisterValueMap);
+    prepareInterproc(MBB, CallInstr);
     ReturnedADBs.clear();
   }
 
@@ -1086,15 +1085,12 @@ private:
   bool allFunctionArgsPartOfAllDepChains(
       PotAddrDepBeg &ADB, MachineInstr *CallInstr,
       std::unordered_set<MachineValue, MachineValue::HashFunction>
-          &DependentArgs,
-      RegisterValueMapping &CallerRVMap);
+          &DependentArgs);
 
   void handleDependentFunctionArgs(MachineInstr *CallInstr,
-                                   MachineBasicBlock *MBB,
-                                   RegisterValueMapping &CallerRVMap);
+                                   MachineBasicBlock *MBB);
 
-  void prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr,
-                        RegisterValueMapping &CallerRVMap);
+  void prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr);
 
   InterprocBFSRes runInterprocBFS(MachineBasicBlock *FirstMBB,
                                   MachineInstr *CallInstr);
@@ -1230,8 +1226,7 @@ void BFSCtx::runBFS() {
 
 bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     PotAddrDepBeg &ADB, MachineInstr *CallInstr,
-    std::unordered_set<MachineValue, MachineValue::HashFunction> &DependentArgs,
-    RegisterValueMapping &CallerRVMap) {
+    std::unordered_set<MachineValue, MachineValue::HashFunction> &DependentArgs) {
   bool FDep = ADB.canBeFullDependency();
 
   if (!ADB.areAllDepChainsAt(MBB)) {
@@ -1257,7 +1252,7 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
   for (unsigned I = 0; I < CalledF.arg_size() && I < AArch64ArgRegs.size();
        ++I) {
     auto Reg = AArch64ArgRegs[I];
-    auto Values = CallerRVMap.getValuesForRegister(Reg, CallInstr);
+    auto Values = RegisterValueMap.getValuesForRegister(Reg, CallInstr);
 
     // TODO: the problem is that the following evaluates to false
     // check why this is the case; check if it evaluated to true before
@@ -1282,15 +1277,13 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
 }
 
 void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
-                                         MachineBasicBlock *MBB,
-                                         RegisterValueMapping &CallerRVMap) {
+                                         MachineBasicBlock *MBB) {
   DepChain DependentArgs{};
 
   for (auto &ADBP : ADBs) {
     auto &ADB = ADBP.second;
 
-    bool FDep = allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs,
-                                                  CallerRVMap);
+    bool FDep = allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs);
 
     // Instead of deleting an ADB if it doesn't run into a function, we keep it
     // with an empty DCM, thereby ensuring that no further items can be added to
@@ -1307,12 +1300,12 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
   }
 }
 
-void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr,
-                              RegisterValueMapping &CallerRVMap) {
-  handleDependentFunctionArgs(CallInstr, MBB, CallerRVMap);
+void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr) {
+  handleDependentFunctionArgs(CallInstr, MBB);
 
   CallPath.push_back(CallInstr);
 
+  this->RegisterValueMap = RegisterValueMapping(MBB->getParent());
   this->MBB = MBB;
 }
 
@@ -1444,25 +1437,24 @@ void BFSCtx::handleBranchInst(MachineInstr *MI) {
 
 void BFSCtx::handleReturnInst(MachineInstr *MI) {
   // get values possibly stored in return register
-  std::set<MachineInstr *> ReturnDependencyVals{};
+  std::set<MachineValue> ReturnDependencyVals = RegisterValueMap.getValuesForRegister(AArch64::X0, MI);
 
   if (recLevel() == 0) {
     return;
   }
 
-  for (auto &ADBP : ADBs) {
-    auto &ADB = ADBP.second;
-    bool AnyBelongToDepChain = false;
-    for (auto *V : ReturnDependencyVals) {
-      AnyBelongToDepChain |= ADB.belongsToDepChain(MBB, V);
+  for (auto &[ID, ADB] : ADBs) {
+    bool BelongsToAllDepChains = true;
+    for (auto V : ReturnDependencyVals) {
+      BelongsToAllDepChains &= ADB.belongsToDepChain(MBB, V);
     }
 
     if (ReturnDependencyVals.empty() || ADB.isDepChainMapEmpty() ||
-        !ADB.isDepChainMapEmpty() || !AnyBelongToDepChain) {
-      ReturnedADBs.emplace(ADBP.first, ADB);
-      ReturnedADBs.at(ADBP.first).clearDCMap();
+        !ADB.isDepChainMapEmpty() || !BelongsToAllDepChains) {
+      ReturnedADBs.emplace(ID, ADB);
+      ReturnedADBs.at(ID).clearDCMap();
     } else {
-      for (auto *V : ReturnDependencyVals) {
+      for (auto V : ReturnDependencyVals) {
         // TODO: this needs to be reworked: what happens if one dep belongs to
         // all and next not?
         if (ADB.belongsToSomeNotAllDepChains(MBB, V)) {
@@ -1470,7 +1462,7 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
         }
       }
 
-      ReturnedADBs.emplace(ADBP.first, ADB);
+      ReturnedADBs.emplace(ID, ADB);
     }
   }
 }
