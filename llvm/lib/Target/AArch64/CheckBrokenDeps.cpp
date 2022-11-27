@@ -1,4 +1,6 @@
 #include "AArch64.h"
+#include "AArch64RegisterInfo.h"
+#include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -32,6 +34,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <iostream>
 #include <iterator>
 #include <list>
@@ -66,16 +69,16 @@ private:
     RegisterArgument,
   } Kind;
   union U {
-    MachineInstr *MI;
-    Register Reg;
+    const MachineInstr *MI;
+    MCRegister Reg;
 
-    U(MachineInstr *MI) : MI(MI) {}
-    U(Register Reg) : Reg(Reg) {}
+    U(const MachineInstr *MI) : MI(MI) {}
+    U(MCRegister Reg) : Reg(Reg) {}
   } U;
 
 public:
-  MachineValue(MachineInstr *MI) : Kind(Instruction), U(MI) {}
-  MachineValue(Register Reg) : Kind(RegisterArgument), U(Reg) {}
+  MachineValue(const MachineInstr *MI) : Kind(Instruction), U(MI) {}
+  MachineValue(MCRegister Reg) : Kind(RegisterArgument), U(Reg) {}
   ~MachineValue() {}
 
   void dump() const;
@@ -104,7 +107,7 @@ public:
       size_t ValHash = 0;
       switch (Other.Kind) {
       case Instruction:
-        ValHash = std::hash<MachineInstr *>()(Other.U.MI);
+        ValHash = std::hash<const MachineInstr *>()(Other.U.MI);
         break;
       case RegisterArgument:
         ValHash = std::hash<unsigned>()(Other.U.Reg);
@@ -120,10 +123,10 @@ void MachineValue::dump() const {
   switch (this->Kind) {
   case Instruction:
     this->U.MI->dump();
-    break;
+    return;
   case RegisterArgument:
     errs() << "Register: " << this->U.Reg << "\n";
-    break;
+    return;
   }
 
   llvm_unreachable("Invalid MachineValue kind");
@@ -142,7 +145,7 @@ raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val) {
   return Os;
 }
 
-static const std::array<Register, 8> AArch64ArgRegs = {
+static const std::array<MCRegister, 8> AArch64ArgRegs = {
     AArch64::X0, AArch64::X1, AArch64::X2, AArch64::X3,
     AArch64::X4, AArch64::X5, AArch64::X6, AArch64::X7};
 
@@ -201,7 +204,8 @@ std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
   return MI->getParent()->getParent()->getName().str() + LAndC;
 }
 
-std::optional<MachineFunction *> getMachineFunctionFromCall(MachineInstr *MI) {
+std::optional<MachineFunction *>
+getMachineFunctionFromCall(const MachineInstr *MI) {
   assert(
       MI->isCall() &&
       "Expected getMachineFunctionFromCall to be called on a call instruction");
@@ -239,108 +243,145 @@ std::string getCalledFunctionName(MachineInstr *MI) {
 
 class RegisterValueMapping {
 public:
-  RegisterValueMapping() /*: RegisterValueMap()*/ {}
+  RegisterValueMapping(const MachineFunction *MF) : RegistersMap() {
+    if (MF->getFunction().getNumOperands() > AArch64ArgRegs.size()) {
+      llvm_unreachable(
+          "Unable to handle functions that pass arguments on the stack");
+    }
+
+    auto *EntryBlock = MF->getBlockNumbered(0);
+
+    for (unsigned I = 0; I < MF->getFunction().arg_size(); ++I) {
+      auto Reg = AArch64ArgRegs[I];
+      RegistersMap[EntryBlock][Reg] = {Reg};
+    }
+  }
 
   std::set<MachineValue> getValuesForRegisters(MachineInstr *MI);
 
-  std::set<MachineValue> getValuesForRegister(Register Reg, MachineInstr *MI);
+  std::set<MachineValue> getValuesForRegister(MCRegister Reg, MachineInstr *MI);
+
+  void enterBlock(const MachineBasicBlock *MBB);
+
+  void visitInstruction(const MachineInstr *MI);
 
 private:
-  // std::map<MachineBasicBlock *, std::map<Register, std::set<MachineInstr *>>>
-  //     RegisterValueMap;
+  std::map<const MachineBasicBlock *,
+           std::map<MCRegister, std::set<MachineValue>>>
+      RegistersMap;
 
   std::set<MachineValue>
-  getValuesForRegister(MachineBasicBlock *MBB, Register Reg,
-                       std::set<MachineBasicBlock *> &Visited,
+  getValuesForRegister(MachineBasicBlock *MBB, MCRegister Reg,
                        MachineInstr *StartBefore = nullptr);
+
+  MCRegister getSuperRegister(MCRegister Reg, const TargetRegisterInfo *TRI) {
+    // convert 32 bit registers (W0-W30) to 64 bit registers (X0-X30)
+    if (Reg >= AArch64::W0 && Reg <= AArch64::W30) {
+      return Reg + (AArch64::X0 - AArch64::W0);
+    }
+
+    if (Reg == AArch64::WZR) {
+      return AArch64::XZR;
+    }
+
+    // don't handle other registers
+    return Reg;
+  }
 };
 
-std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
-    MachineBasicBlock *MBB, Register Reg,
-    std::set<MachineBasicBlock *> &Visited, MachineInstr *StartBefore) {
-  assert((StartBefore == nullptr || MBB == StartBefore->getParent()) &&
-         "StartAt->getParent and passed MBB do not match");
-
-  // if we are looking up values for the zero register, return an empty set
-  // NOLINTNEXTLINE(misc-redundant-expression)
-  if (Reg == AArch64::XZR || Reg == AArch64::WZR) {
-    return {};
+void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
+  if (RegistersMap.find(MBB) != RegistersMap.end()) {
+    MFDEBUG(errs() << "entering block for the second time\n";);
   }
 
-  // already visited this basic block, return
-  if (Visited.find(MBB) != Visited.end()) {
-    return {};
-  }
-
-  Visited.insert(MBB);
-
-  // for now, don't chache register values
-  // this might be good idea for future optimizations
-  // the problem is that we need to consider that there might be multiple
-  // writes to a register in a basic block -- how do we handle this?
-
-  // auto &RegMap = RegisterValueMap[MBB];
-  // if (StartAt == nullptr) {
-  //   // check if we already computed this
-  //   if (auto Val = RegMap.find(Reg); Val != RegMap.end()) {
-  //     return Val->second;
-  //   }
-  // }
-
-  auto It = MBB->rbegin();
-  if (StartBefore != nullptr) {
-    // walk until we reach StartAt
-    while (It != MBB->rend() && It != StartBefore) {
-      ++It;
+  // union of all predecessor values
+  for (auto *Pred : MBB->predecessors()) {
+    auto OutgoingRegisters = RegistersMap.find(Pred);
+    if (OutgoingRegisters == RegistersMap.end()) {
+      llvm_unreachable_internal("Predecessor not visited");
     }
 
-    if (It != MBB->rend()) {
-      // walk one further than StartAt
-      ++It;
+    for (auto &[Reg, Values] : OutgoingRegisters->second) {
+      RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
     }
   }
 
-  for (; It != MBB->rend(); ++It) {
-    // instruction defines register, it is the only instruction that should be
-    // returned
-    // TODO: handle subregisters
-
-    auto *TRI = MBB->getParent()->getSubtarget().getRegisterInfo();
-
-    for (MCSubRegIterator SubRegs(Reg, TRI, true); SubRegs.isValid();
-         ++SubRegs) {
-      if (It->definesRegister(*SubRegs)) {
-        return {&*It};
+  if (MFDEBUG_ENABLED) {
+    for (auto &[Reg, Values] : RegistersMap[MBB]) {
+      errs()
+          << "- reg: "
+          << MBB->getParent()->getSubtarget().getRegisterInfo()->getRegAsmName(
+                 Reg)
+          << "\n";
+      for (auto &Val : Values) {
+        errs() << "-- ";
+        Val.dump();
       }
     }
   }
+}
 
-  // if we are in the entry block for this function, we also need to check if
-  // the register is an argument register
-  auto *MF = MBB->getParent();
-  // TODO: check if we can compare blocks just by their number
-  if (MF->front().getNumber() == MBB->getNumber() &&
-      MF->getRegInfo().isArgumentRegister(*MF, Reg)) {
-    const auto *ArgReg =
-        std::find(AArch64ArgRegs.begin(), AArch64ArgRegs.end(), Reg);
-    if (ArgReg != AArch64ArgRegs.end() &&
-        std::distance(AArch64ArgRegs.begin(), ArgReg) <
-            static_cast<long>(MF->getFunction().arg_size())) {
-      // this is an argument register used for this function
-      return {*ArgReg};
+void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
+  // TODO: what if this is a call instruction? we need to set the return value
+  auto *MBB = MI->getParent();
+
+  auto *TRI = MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
+
+  for (auto &Op : MI->operands()) {
+    if (!Op.isReg() || !Op.isDef()) {
+      continue;
+    }
+
+    auto Reg = getSuperRegister(Op.getReg(), TRI);
+
+    if (Reg == AArch64::XZR) {
+      continue;
+    }
+
+    MFDEBUG(errs() << "- def " << TRI->getName(Reg) << "\n";);
+
+    RegistersMap[MBB][Reg].clear();
+    RegistersMap[MBB][Reg].insert(MI);
+  }
+
+  if (MI->isCall()) {
+    auto CalledMFOptional = getMachineFunctionFromCall(MI);
+    if (!CalledMFOptional.has_value()) {
+      return;
+    }
+    auto *CalledMF = *CalledMFOptional;
+    auto &CalledF = CalledMF->getFunction();
+
+    if (CalledF.getReturnType()->isIntOrPtrTy()) {
+      MFDEBUG(errs() << "- def " << TRI->getName(AArch64::X0) << "\n";);
+
+      RegistersMap[MBB][AArch64::X0].clear();
+      RegistersMap[MBB][AArch64::X0].insert(MI);
+    } else if (!CalledF.getReturnType()->isVoidTy()) {
+      llvm_unreachable("Unsupported return type");
+    }
+  }
+}
+
+std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
+    MachineBasicBlock *MBB, MCRegister Reg, MachineInstr *StartBefore) {
+  assert((StartBefore == nullptr || MBB == StartBefore->getParent()) &&
+         "StartAt->getParent and passed MBB do not match");
+
+  auto *TRI = MBB->getParent()->getSubtarget().getRegisterInfo();
+  Reg = getSuperRegister(Reg, TRI);
+
+  auto Ret = RegistersMap[MBB][Reg];
+
+  if (MFDEBUG_ENABLED) {
+    errs() << "- reading " << TRI->getRegAsmName(Reg) << ":\n";
+    for (auto &Val : Ret) {
+      errs() << "  - ";
+      Val.dump();
     }
   }
 
-  // register was not defined in this, we need to look it up in the predecessors
-  std::set<MachineValue> Result{};
-
-  for (auto &Pred : MBB->predecessors()) {
-    auto PredResult = getValuesForRegister(Pred, Reg, Visited);
-    Result.insert(PredResult.begin(), PredResult.end());
-  }
-  // RegMap[Reg] = Result;
-
-  return Result;
+  return Ret;
 }
 
 std::set<MachineValue>
@@ -348,9 +389,7 @@ RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
   std::set<MachineValue> Deps{};
   for (auto Op : MI->operands()) {
     if (Op.isReg() && MI->readsRegister(Op.getReg())) {
-      std::set<MachineBasicBlock *> Visited;
-      auto DepsForReg =
-          getValuesForRegister(MI->getParent(), Op.getReg(), Visited, MI);
+      auto DepsForReg = getValuesForRegister(MI->getParent(), Op.getReg(), MI);
       Deps.insert(DepsForReg.begin(), DepsForReg.end());
     }
   }
@@ -359,9 +398,8 @@ RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
 }
 
 std::set<MachineValue>
-RegisterValueMapping::getValuesForRegister(Register Reg, MachineInstr *MI) {
-  std::set<MachineBasicBlock *> Visited;
-  return getValuesForRegister(MI->getParent(), Reg, Visited, MI);
+RegisterValueMapping::getValuesForRegister(MCRegister Reg, MachineInstr *MI) {
+  return getValuesForRegister(MI->getParent(), Reg, MI);
 }
 
 class DepHalf {
@@ -982,16 +1020,19 @@ using InterprocBFSRes = DepHalfMap<PotAddrDepBeg>;
 
 class BFSCtx {
 public:
+  // TODO: make sure MBB is always the first basic block
   BFSCtx(MachineBasicBlock *MBB, DepHalfMap<VerAddrDepBeg> &BrokenADBs,
          DepHalfMap<VerAddrDepEnd> &BrokenADEs, IDReMap &RemappedIDs,
          VerIDSet &VerifiedIDs)
       : MBB(MBB), ADBs(), ReturnedADBs(), CallPath(CallPathStack()),
-        RegisterValueMap(), BrokenADBs(BrokenADBs), BrokenADEs(BrokenADEs),
-        RemappedIDs(RemappedIDs), VerifiedIDs(VerifiedIDs) {}
+        RegisterValueMap(MBB->getParent()), BrokenADBs(BrokenADBs),
+        BrokenADEs(BrokenADEs), RemappedIDs(RemappedIDs),
+        VerifiedIDs(VerifiedIDs) {}
 
   BFSCtx(BFSCtx &Ctx, MachineBasicBlock *MBB, MachineInstr *CallInstr)
       : BFSCtx(Ctx) {
-    prepareInterproc(MBB, CallInstr);
+    this->RegisterValueMap = RegisterValueMapping(MBB->getParent());
+    prepareInterproc(MBB, CallInstr, Ctx.RegisterValueMap);
     ReturnedADBs.clear();
   }
 
@@ -1045,12 +1086,15 @@ private:
   bool allFunctionArgsPartOfAllDepChains(
       PotAddrDepBeg &ADB, MachineInstr *CallInstr,
       std::unordered_set<MachineValue, MachineValue::HashFunction>
-          &DependentArgs);
+          &DependentArgs,
+      RegisterValueMapping &CallerRVMap);
 
   void handleDependentFunctionArgs(MachineInstr *CallInstr,
-                                   MachineBasicBlock *MBB);
+                                   MachineBasicBlock *MBB,
+                                   RegisterValueMapping &CallerRVMap);
 
-  void prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr);
+  void prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr,
+                        RegisterValueMapping &CallerRVMap);
 
   InterprocBFSRes runInterprocBFS(MachineBasicBlock *FirstMBB,
                                   MachineInstr *CallInstr);
@@ -1091,18 +1135,31 @@ private:
   }
 
   void markIDAsVerified(std::string &ParsedID) {
-    BrokenADBs.erase(ParsedID);
-    BrokenADEs.erase(ParsedID);
+    auto DelID = [](auto &ID, auto &Bs, auto &Es, auto &RemappedIDs) {
+      Bs.erase(ID);
+      Es.erase(ID);
 
-    if (RemappedIDs.find(ParsedID) != RemappedIDs.end()) {
-      for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
-        BrokenADBs.erase(RemappedID);
-        BrokenADEs.erase(RemappedID);
+      if (RemappedIDs.find(ID) != RemappedIDs.end()) {
+        for (auto const &RemappedID : RemappedIDs.at(ID)) {
+          Bs.erase(RemappedID);
+          Es.erase(RemappedID);
+        }
       }
-    }
+    };
 
-    VerifiedIDs.insert(ParsedID);
-    RemappedIDs.erase(ParsedID);
+    DelID(ParsedID, BrokenADBs, BrokenADEs, RemappedIDs);
+    // BrokenADBs.erase(ParsedID);
+    // BrokenADEs.erase(ParsedID);
+
+    // if (RemappedIDs.find(ParsedID) != RemappedIDs.end()) {
+    //   for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
+    //     BrokenADBs.erase(RemappedID);
+    //     BrokenADEs.erase(RemappedID);
+    //   }
+    // }
+
+    // VerifiedIDs.insert(ParsedID);
+    // RemappedIDs.erase(ParsedID);
   }
 
   // helper methods
@@ -1173,8 +1230,8 @@ void BFSCtx::runBFS() {
 
 bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     PotAddrDepBeg &ADB, MachineInstr *CallInstr,
-    std::unordered_set<MachineValue, MachineValue::HashFunction>
-        &DependentArgs) {
+    std::unordered_set<MachineValue, MachineValue::HashFunction> &DependentArgs,
+    RegisterValueMapping &CallerRVMap) {
   bool FDep = ADB.canBeFullDependency();
 
   if (!ADB.areAllDepChainsAt(MBB)) {
@@ -1200,8 +1257,10 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
   for (unsigned I = 0; I < CalledF.arg_size() && I < AArch64ArgRegs.size();
        ++I) {
     auto Reg = AArch64ArgRegs[I];
-    auto Values = RegisterValueMap.getValuesForRegister(Reg, CallInstr);
+    auto Values = CallerRVMap.getValuesForRegister(Reg, CallInstr);
 
+    // TODO: the problem is that the following evaluates to false
+    // check why this is the case; check if it evaluated to true before
     auto BelongsToDepChain =
         std::all_of(Values.begin(), Values.end(),
                     [&](auto &V) { return ADB.belongsToDepChain(MBB, V); });
@@ -1223,14 +1282,15 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
 }
 
 void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
-                                         MachineBasicBlock *MBB) {
+                                         MachineBasicBlock *MBB,
+                                         RegisterValueMapping &CallerRVMap) {
   DepChain DependentArgs{};
 
   for (auto &ADBP : ADBs) {
     auto &ADB = ADBP.second;
 
-    bool FDep =
-        allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs);
+    bool FDep = allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs,
+                                                  CallerRVMap);
 
     // Instead of deleting an ADB if it doesn't run into a function, we keep it
     // with an empty DCM, thereby ensuring that no further items can be added to
@@ -1247,8 +1307,9 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
   }
 }
 
-void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr) {
-  handleDependentFunctionArgs(CallInstr, MBB);
+void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr,
+                              RegisterValueMapping &CallerRVMap) {
+  handleDependentFunctionArgs(CallInstr, MBB, CallerRVMap);
 
   CallPath.push_back(CallInstr);
 
@@ -1263,10 +1324,10 @@ InterprocBFSRes BFSCtx::runInterprocBFS(MachineBasicBlock *FirstMBB,
 }
 
 void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
-  LLVM_DEBUG(dbgs() << "Visiting machine basic block" << MBB->getNumber()
-                    << "\n";);
+  MFDEBUG(errs() << "Block bb." << MBB->getNumber() << "\n";);
 
   this->MBB = MBB;
+  RegisterValueMap.enterBlock(MBB);
 
   for (auto &MI : *MBB) {
     if (!MI.isDebugInstr()) {
@@ -1293,6 +1354,8 @@ void BFSCtx::visitInstruction(MachineInstr *MI) {
     handleReturnInst(MI);
   }
   handleInstruction(MI);
+
+  RegisterValueMap.visitInstruction(MI);
 }
 
 void BFSCtx::handleCallInst(MachineInstr *MI) {
@@ -1694,9 +1757,11 @@ char CheckDepsPass::ID = 0;
 bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
   if (!MFDEBUG_ENABLED ||
       MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" ||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" ||
-      MF.getName().str() == "doitlk_rr_addr_dep_begin_simple") {
-    LLVM_DEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n");
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" /*||
+      MF.getName().str() == "doitlk_rr_addr_dep_begin_simple"*/) {
+    MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
+    MFDEBUG(MF.dump(););
+
     BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs,
                   VerifiedIDs);
     BFSCtx.runBFS();
@@ -1708,27 +1773,51 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
 }
 
 void CheckDepsPass::printBrokenDeps() {
-  for (auto &[ParsedID, VDB] : BrokenADBs) {
-    auto ID = ParsedID;
+  auto CheckDepPair = [this](auto &P, auto &E) {
+    auto ID = P.first;
     // Exclude duplicate IDs by normalising them.
     // This means we only print one representative of each equivalence class.
-    if (auto Pos = ID.find("-#")) {
+    if (auto Pos = ID.find("-#"))
       ID = ID.substr(0, Pos);
-    }
 
-    auto VDEP = BrokenADEs.find(ID);
+    auto &VDB = P.second;
 
-    if (VDEP == BrokenADEs.end())
+    auto VDEP = E.find(ID);
+    if (VDEP == E.end())
       return;
 
     auto &VDE = VDEP->second;
-
     if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end())
       return;
 
     PrintedBrokenIDs.insert(ID);
     printBrokenDep(VDB, VDE, ID);
-  }
+  };
+
+  for (auto &VADBP : BrokenADBs)
+    CheckDepPair(VADBP, BrokenADEs);
+
+  // for (auto &[ParsedID, VDB] : BrokenADBs) {
+  //   auto ID = ParsedID;
+  //   // Exclude duplicate IDs by normalising them.
+  //   // This means we only print one representative of each equivalence class.
+  //   if (auto Pos = ID.find("-#"); Pos != std::string::npos) {
+  //     ID = ID.substr(0, Pos);
+  //   }
+
+  //   auto VDEP = BrokenADEs.find(ID);
+
+  //   if (VDEP == BrokenADEs.end())
+  //     return;
+
+  //   auto &VDE = VDEP->second;
+
+  //   if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end())
+  //     return;
+
+  //   PrintedBrokenIDs.insert(ID);
+  //   printBrokenDep(VDB, VDE, ID);
+  // }
 }
 
 void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
