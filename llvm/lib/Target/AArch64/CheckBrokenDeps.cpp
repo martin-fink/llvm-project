@@ -48,7 +48,7 @@
 #include <utility>
 
 // TODO: remove this
-#define MFDEBUG_ENABLED 1
+#define MFDEBUG_ENABLED 0
 
 #if MFDEBUG_ENABLED
 #define MFDEBUG(X)                                                             \
