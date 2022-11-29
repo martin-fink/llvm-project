@@ -1131,31 +1131,19 @@ private:
   }
 
   void markIDAsVerified(std::string &ParsedID) {
-    auto DelID = [](auto &ID, auto &Bs, auto &Es, auto &RemappedIDs) {
-      Bs.erase(ID);
-      Es.erase(ID);
+    BrokenADBs.erase(ParsedID);
+    BrokenADEs.erase(ParsedID);
 
-      if (RemappedIDs.find(ID) != RemappedIDs.end()) {
-        for (auto const &RemappedID : RemappedIDs.at(ID)) {
-          Bs.erase(RemappedID);
-          Es.erase(RemappedID);
-        }
+    if (auto IDs = this->RemappedIDs.find(ParsedID);
+        IDs != this->RemappedIDs.end()) {
+      for (auto const &RemappedID : IDs->second) {
+        BrokenADBs.erase(RemappedID);
+        BrokenADEs.erase(RemappedID);
       }
-    };
+    }
 
-    DelID(ParsedID, BrokenADBs, BrokenADEs, RemappedIDs);
-    // BrokenADBs.erase(ParsedID);
-    // BrokenADEs.erase(ParsedID);
-
-    // if (RemappedIDs.find(ParsedID) != RemappedIDs.end()) {
-    //   for (auto const &RemappedID : RemappedIDs.at(ParsedID)) {
-    //     BrokenADBs.erase(RemappedID);
-    //     BrokenADEs.erase(RemappedID);
-    //   }
-    // }
-
-    // VerifiedIDs.insert(ParsedID);
-    // RemappedIDs.erase(ParsedID);
+    VerifiedIDs.insert(ParsedID);
+    RemappedIDs.erase(ParsedID);
   }
 
   // helper methods
@@ -1226,7 +1214,8 @@ void BFSCtx::runBFS() {
 
 bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     PotAddrDepBeg &ADB, MachineInstr *CallInstr,
-    std::unordered_set<MachineValue, MachineValue::HashFunction> &DependentArgs) {
+    std::unordered_set<MachineValue, MachineValue::HashFunction>
+        &DependentArgs) {
   bool FDep = ADB.canBeFullDependency();
 
   if (!ADB.areAllDepChainsAt(MBB)) {
@@ -1254,10 +1243,8 @@ bool BFSCtx::allFunctionArgsPartOfAllDepChains(
     auto Reg = AArch64ArgRegs[I];
     auto Values = RegisterValueMap.getValuesForRegister(Reg, CallInstr);
 
-    // TODO: the problem is that the following evaluates to false
-    // check why this is the case; check if it evaluated to true before
     auto BelongsToDepChain =
-        std::all_of(Values.begin(), Values.end(),
+        std::any_of(Values.begin(), Values.end(),
                     [&](auto &V) { return ADB.belongsToDepChain(MBB, V); });
     if (!BelongsToDepChain) {
       continue;
@@ -1283,7 +1270,8 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
   for (auto &ADBP : ADBs) {
     auto &ADB = ADBP.second;
 
-    bool FDep = allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs);
+    bool FDep =
+        allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs);
 
     // Instead of deleting an ADB if it doesn't run into a function, we keep it
     // with an empty DCM, thereby ensuring that no further items can be added to
@@ -1369,11 +1357,9 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
     return;
   }
 
-  // TODO: check if we can use CalledMF.front()
   InterprocBFSRes ReturnedADBsFromCall =
       runInterprocBFS(&*CalledMF->begin(), MI);
 
-  // auto &ReturnedADBsFromCall = Ret;
   for (auto &[ID, ReturnedADB] : ReturnedADBsFromCall) {
     if (ADBs.find(ID) != ADBs.end()) {
       auto &ADB = ADBs.at(ID);
@@ -1405,27 +1391,19 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
 }
 
 void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
-  // handle common load/store functionality
-  handleDepAnnotations(MI, getLKMMAnnotations(MI));
+  auto Annotations = getLKMMAnnotations(MI);
+  handleDepAnnotations(MI, Annotations);
 
   std::set<MachineValue> Dependencies =
       RegisterValueMap.getValuesForRegisters(MI);
 
-  if (MI->mayStore()) {
-    for (auto &ADBP : ADBs) {
-      auto &ADB = ADBP.second;
-
-      for (auto V : Dependencies) {
-        ADB.tryAddValueToDepChains(RegisterValueMap, MI, V, V);
+  for (auto &[ID, ADB] : ADBs) {
+    for (auto &Dep : Dependencies) {
+      if (MI->mayStore()) {
+        ADB.tryAddValueToDepChains(RegisterValueMap, MI, Dep, Dep);
       }
-    }
-  }
-  if (MI->mayLoad()) {
-    for (auto &ADBP : ADBs) {
-      auto &ADB = ADBP.second;
-
-      for (auto V : Dependencies) {
-        ADB.tryAddValueToDepChains(RegisterValueMap, MI, V, MI);
+      if (MI->mayLoad()) {
+        ADB.tryAddValueToDepChains(RegisterValueMap, MI, Dep, MI);
       }
     }
   }
@@ -1437,29 +1415,31 @@ void BFSCtx::handleBranchInst(MachineInstr *MI) {
 
 void BFSCtx::handleReturnInst(MachineInstr *MI) {
   // get values possibly stored in return register
-  std::set<MachineValue> ReturnDependencyVals = RegisterValueMap.getValuesForRegister(AArch64::X0, MI);
+  std::set<MachineValue> ReturnDependencyVals =
+      RegisterValueMap.getValuesForRegister(AArch64::X0, MI);
 
   if (recLevel() == 0) {
     return;
   }
 
   for (auto &[ID, ADB] : ADBs) {
-    bool BelongsToAllDepChains = true;
-    for (auto V : ReturnDependencyVals) {
-      BelongsToAllDepChains &= ADB.belongsToDepChain(MBB, V);
-    }
+    bool BelongsToSomeDepChains = false;
 
     if (ReturnDependencyVals.empty() || ADB.isDepChainMapEmpty() ||
-        !ADB.isDepChainMapEmpty() || !BelongsToAllDepChains) {
+        !BelongsToSomeDepChains) {
       ReturnedADBs.emplace(ID, ADB);
       ReturnedADBs.at(ID).clearDCMap();
     } else {
+      bool BelongsToAllDepChains = true;
+      bool BelongsToSomeDepChains = false;
+
       for (auto V : ReturnDependencyVals) {
-        // TODO: this needs to be reworked: what happens if one dep belongs to
-        // all and next not?
-        if (ADB.belongsToSomeNotAllDepChains(MBB, V)) {
-          ADB.cannotBeFullDependencyAnymore();
-        }
+        BelongsToAllDepChains &= ADB.belongsToAllDepChains(MBB, V);
+        BelongsToSomeDepChains |= ADB.belongsToDepChain(MBB, V);
+      }
+
+      if (!BelongsToAllDepChains && BelongsToSomeDepChains) {
+        ADB.cannotBeFullDependencyAnymore();
       }
 
       ReturnedADBs.emplace(ID, ADB);
@@ -1748,11 +1728,12 @@ char CheckDepsPass::ID = 0;
 
 bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
   if (!MFDEBUG_ENABLED ||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" ||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" /*||
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" /*||
+      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" */ /*||
       MF.getName().str() == "doitlk_rr_addr_dep_begin_simple"*/) {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
+    MFDEBUG(MF.getFunction().dump(););
 
     BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs,
                   VerifiedIDs);
@@ -1765,51 +1746,29 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
 }
 
 void CheckDepsPass::printBrokenDeps() {
-  auto CheckDepPair = [this](auto &P, auto &E) {
-    auto ID = P.first;
+  for (auto &VADBP : BrokenADBs) {
+    auto ID = VADBP.first;
     // Exclude duplicate IDs by normalising them.
     // This means we only print one representative of each equivalence class.
-    if (auto Pos = ID.find("-#"))
+    if (auto Pos = ID.find("-#"); Pos != std::string::npos) {
       ID = ID.substr(0, Pos);
+    }
 
-    auto &VDB = P.second;
+    auto &VDB = VADBP.second;
 
-    auto VDEP = E.find(ID);
-    if (VDEP == E.end())
-      return;
+    auto VDEP = BrokenADEs.find(ID);
+    if (VDEP == BrokenADEs.end()) {
+      continue;
+    }
 
     auto &VDE = VDEP->second;
-    if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end())
-      return;
+    if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end()) {
+      continue;
+    }
 
     PrintedBrokenIDs.insert(ID);
     printBrokenDep(VDB, VDE, ID);
-  };
-
-  for (auto &VADBP : BrokenADBs)
-    CheckDepPair(VADBP, BrokenADEs);
-
-  // for (auto &[ParsedID, VDB] : BrokenADBs) {
-  //   auto ID = ParsedID;
-  //   // Exclude duplicate IDs by normalising them.
-  //   // This means we only print one representative of each equivalence class.
-  //   if (auto Pos = ID.find("-#"); Pos != std::string::npos) {
-  //     ID = ID.substr(0, Pos);
-  //   }
-
-  //   auto VDEP = BrokenADEs.find(ID);
-
-  //   if (VDEP == BrokenADEs.end())
-  //     return;
-
-  //   auto &VDE = VDEP->second;
-
-  //   if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end())
-  //     return;
-
-  //   PrintedBrokenIDs.insert(ID);
-  //   printBrokenDep(VDB, VDE, ID);
-  // }
+  }
 }
 
 void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
