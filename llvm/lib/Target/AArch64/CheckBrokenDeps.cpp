@@ -48,7 +48,7 @@
 #include <utility>
 
 // TODO: remove this
-#define MFDEBUG_ENABLED 0
+#define MFDEBUG_ENABLED 1
 
 #if MFDEBUG_ENABLED
 #define MFDEBUG(X)                                                             \
@@ -62,6 +62,43 @@
 using namespace llvm;
 
 namespace {
+static const std::array<MCRegister, 8> AArch64ArgRegs = {
+    AArch64::X0, AArch64::X1, AArch64::X2, AArch64::X3,
+    AArch64::X4, AArch64::X5, AArch64::X6, AArch64::X7};
+
+#define DEBUG_TYPE "lkmm-dep-checker-backend"
+
+std::string getArgRegName(MCRegister Reg) {
+  switch (Reg) {
+  case AArch64::X0:
+  case AArch64::W0:
+    return "X0";
+  case AArch64::X1:
+  case AArch64::W1:
+    return "X1";
+  case AArch64::X2:
+  case AArch64::W2:
+    return "X2";
+  case AArch64::X3:
+  case AArch64::W3:
+    return "X3";
+  case AArch64::X4:
+  case AArch64::W4:
+    return "X4";
+  case AArch64::X5:
+  case AArch64::W5:
+    return "X5";
+  case AArch64::X6:
+  case AArch64::W6:
+    return "X6";
+  case AArch64::X7:
+  case AArch64::W7:
+    return "X7";
+  default:
+    return "unknown";
+  }
+}
+
 class MachineValue {
 private:
   enum Kind {
@@ -125,7 +162,7 @@ void MachineValue::dump() const {
     this->U.MI->dump();
     return;
   case RegisterArgument:
-    errs() << "Register: " << this->U.Reg << "\n";
+    errs() << "  register: " << getArgRegName(this->U.Reg) << "\n";
     return;
   }
 
@@ -138,18 +175,11 @@ raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val) {
     Os << Val.U.MI;
     break;
   case MachineValue::Kind::RegisterArgument:
-    // TODO: print register name
-    Os << "Register argument: " << static_cast<unsigned>(Val.U.Reg);
+    Os << "register: " << getArgRegName(Val.U.Reg);
     break;
   }
   return Os;
 }
-
-static const std::array<MCRegister, 8> AArch64ArgRegs = {
-    AArch64::X0, AArch64::X1, AArch64::X2, AArch64::X3,
-    AArch64::X4, AArch64::X5, AArch64::X6, AArch64::X7};
-
-#define DEBUG_TYPE "lkmm-dep-checker-backend"
 
 using IDReMap =
     std::unordered_map<std::string, std::unordered_set<std::string>>;
