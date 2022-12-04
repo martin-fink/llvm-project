@@ -302,9 +302,18 @@ private:
 
   std::set<MachineValue>
   getValuesForRegister(MachineBasicBlock *MBB, MCRegister Reg,
-                       MachineInstr *StartBefore = nullptr);
+                       MachineInstr *StartBefore = nullptr) const;
 
-  MCRegister getSuperRegister(MCRegister Reg, const TargetRegisterInfo *TRI) {
+  std::map<MCRegister, std::set<MachineValue>>
+  getValuesForInstruction(const MachineInstr *MI) const;
+
+  void getOutgoingValuesForUnvisitedBlock(
+      const MachineBasicBlock *MBB,
+      std::map<MCRegister, std::set<MachineValue>> &Result,
+      std::set<const MachineBasicBlock *> &Visited) const;
+
+  MCRegister getSuperRegister(MCRegister Reg,
+                              const TargetRegisterInfo *TRI) const {
     // convert 32 bit registers (W0-W30) to 64 bit registers (X0-X30)
     if (Reg >= AArch64::W0 && Reg <= AArch64::W30) {
       return Reg + (AArch64::X0 - AArch64::W0);
@@ -328,11 +337,17 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
   for (auto *Pred : MBB->predecessors()) {
     auto OutgoingRegisters = RegistersMap.find(Pred);
     if (OutgoingRegisters == RegistersMap.end()) {
-      llvm_unreachable_internal("Predecessor not visited");
-    }
+      std::map<MCRegister, std::set<MachineValue>> IncomingValues{};
+      std::set<const MachineBasicBlock *> Visited{};
+      getOutgoingValuesForUnvisitedBlock(Pred, IncomingValues, Visited);
 
-    for (auto &[Reg, Values] : OutgoingRegisters->second) {
-      RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
+      for (auto &[Reg, Values] : IncomingValues) {
+        RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
+      }
+    } else {
+      for (auto &[Reg, Values] : OutgoingRegisters->second) {
+        RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
+      }
     }
   }
 
@@ -351,12 +366,61 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
   }
 }
 
-void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
-  // TODO: what if this is a call instruction? we need to set the return value
-  auto *MBB = MI->getParent();
+// TODO: in order to avoid allocations pass the map with the result as an
+// argument
+void RegisterValueMapping::getOutgoingValuesForUnvisitedBlock(
+    const MachineBasicBlock *MBB,
+    std::map<MCRegister, std::set<MachineValue>> &Result,
+    std::set<const MachineBasicBlock *> &Visited) const {
+  if (Visited.find(const_cast<MachineBasicBlock *>(MBB)) != Visited.end()) {
+    return;
+  }
+  Visited.insert(MBB);
 
+  if (auto ValuesForBlock = RegistersMap.find(MBB);
+      ValuesForBlock != RegistersMap.end()) {
+    for (auto &[Reg, Values] : ValuesForBlock->second) {
+      // I think we don't need to clear the set for the given register and block
+      Result[Reg].insert(Values.begin(), Values.end());
+    }
+    return;
+  }
+
+  for (auto *Pred : MBB->predecessors()) {
+    getOutgoingValuesForUnvisitedBlock(Pred, Result, Visited);
+  }
+
+  // since all predecessors have been visited, now we need to walk all
+  // instructions and check which registers they write to
+  for (auto Iter = MBB->rbegin(); Iter != MBB->rend(); ++Iter) {
+    auto Values = getValuesForInstruction(&*Iter);
+    for (auto &[Reg, Values] : Values) {
+      Result[Reg].clear();
+      Result[Reg].insert(Values.begin(), Values.end());
+    }
+  }
+}
+
+std::map<MCRegister, std::set<MachineValue>>
+RegisterValueMapping::getValuesForInstruction(const MachineInstr *MI) const {
   auto *TRI = MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
 
+  if (MI->isCall()) {
+    auto CalledMFOptional = getMachineFunctionFromCall(MI);
+    if (CalledMFOptional.has_value()) {
+      auto *CalledMF = *CalledMFOptional;
+      auto &CalledF = CalledMF->getFunction();
+
+      if (CalledF.getReturnType()->isIntOrPtrTy()) {
+        return {{AArch64::X0, {MachineValue(AArch64::X0)}}};
+      }
+      if (!CalledF.getReturnType()->isVoidTy()) {
+        llvm_unreachable("Unsupported return type");
+      }
+    }
+  }
+
+  std::map<MCRegister, std::set<MachineValue>> Ret{};
   for (auto &Op : MI->operands()) {
     if (!Op.isReg() || !Op.isDef()) {
       continue;
@@ -368,50 +432,93 @@ void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
       continue;
     }
 
-    MFDEBUG(errs() << "- def " << TRI->getName(Reg) << "\n";);
+    Ret[Reg].insert(MI);
+  }
 
+  return Ret;
+}
+
+void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
+  auto *MBB = MI->getParent();
+
+  auto ValuesForInstruction = getValuesForInstruction(MI);
+
+  for (auto &[Reg, Values] : ValuesForInstruction) {
     RegistersMap[MBB][Reg].clear();
-    RegistersMap[MBB][Reg].insert(MI);
-  }
+    RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
 
-  if (MI->isCall()) {
-    auto CalledMFOptional = getMachineFunctionFromCall(MI);
-    if (!CalledMFOptional.has_value()) {
-      return;
-    }
-    auto *CalledMF = *CalledMFOptional;
-    auto &CalledF = CalledMF->getFunction();
-
-    if (CalledF.getReturnType()->isIntOrPtrTy()) {
-      MFDEBUG(errs() << "- def " << TRI->getName(AArch64::X0) << "\n";);
-
-      RegistersMap[MBB][AArch64::X0].clear();
-      RegistersMap[MBB][AArch64::X0].insert(MI);
-    } else if (!CalledF.getReturnType()->isVoidTy()) {
-      llvm_unreachable("Unsupported return type");
+    if (MFDEBUG_ENABLED) {
+      auto *TRI =
+          MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
+      errs() << "- def " << TRI->getName(Reg) << "\n";
     }
   }
+
+  // auto *TRI = MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
+
+  // for (auto &Op : MI->operands()) {
+  //   if (!Op.isReg() || !Op.isDef()) {
+  //     continue;
+  //   }
+
+  //   auto Reg = getSuperRegister(Op.getReg(), TRI);
+
+  //   if (Reg == AArch64::XZR) {
+  //     continue;
+  //   }
+
+  //   MFDEBUG(errs() << "- def " << TRI->getName(Reg) << "\n";);
+
+  //   RegistersMap[MBB][Reg].clear();
+  //   RegistersMap[MBB][Reg].insert(MI);
+  // }
+
+  // if (MI->isCall()) {
+  //   auto CalledMFOptional = getMachineFunctionFromCall(MI);
+  //   if (!CalledMFOptional.has_value()) {
+  //     return;
+  //   }
+  //   auto *CalledMF = *CalledMFOptional;
+  //   auto &CalledF = CalledMF->getFunction();
+
+  //   if (CalledF.getReturnType()->isIntOrPtrTy()) {
+  //     MFDEBUG(errs() << "- def " << TRI->getName(AArch64::X0) << "\n";);
+
+  //     RegistersMap[MBB][AArch64::X0].clear();
+  //     RegistersMap[MBB][AArch64::X0].insert(MI);
+  //   } else if (!CalledF.getReturnType()->isVoidTy()) {
+  //     llvm_unreachable("Unsupported return type");
+  //   }
+  // }
 }
 
 std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
-    MachineBasicBlock *MBB, MCRegister Reg, MachineInstr *StartBefore) {
+    MachineBasicBlock *MBB, MCRegister Reg, MachineInstr *StartBefore) const {
   assert((StartBefore == nullptr || MBB == StartBefore->getParent()) &&
          "StartAt->getParent and passed MBB do not match");
 
   auto *TRI = MBB->getParent()->getSubtarget().getRegisterInfo();
   Reg = getSuperRegister(Reg, TRI);
 
-  auto Ret = RegistersMap[MBB][Reg];
+  auto RegForBlockMap = RegistersMap.find(MBB);
+  if (RegForBlockMap == RegistersMap.end()) {
+    llvm_unreachable_internal("Block not visited");
+  }
+  auto Ret = RegForBlockMap->second.find(Reg);
+
+  if (Ret == RegForBlockMap->second.end()) {
+    return {};
+  }
 
   if (MFDEBUG_ENABLED) {
     errs() << "- reading " << TRI->getRegAsmName(Reg) << ":\n";
-    for (auto &Val : Ret) {
+    for (auto &Val : Ret->second) {
       errs() << "  - ";
       Val.dump();
     }
   }
 
-  return Ret;
+  return Ret->second;
 }
 
 std::set<MachineValue>
@@ -1047,6 +1154,26 @@ struct BFSBBInfo {
 };
 
 using InterprocBFSRes = DepHalfMap<PotAddrDepBeg>;
+
+// struct BFSRes {
+// BFSRes(InterprocBFSRes InterprocBFSRes, DepHalfMap<VerAddrDepBeg>
+// VerAddrDepBegs,
+//        DepHalfMap<VerAddrDepEnd> VerAddrDepEnds)
+//     : InterprocBFSRes(InterprocBFSRes), VerAddrDepBegs(VerAddrDepBegs),
+//       VerAddrDepEnds(VerAddrDepEnds) {}
+
+//   DepHalfMap<VerAddrDepBeg> BrokenADBs;
+
+//   DepHalfMap<VerAddrDepEnd> BrokenADEs;
+
+//   IDReMap RemappedIDs;
+
+//   std::unordered_set<std::string> VerifiedIDs;
+
+//   std::unordered_set<std::string> PrintedBrokenIDs;
+
+//   DepHalfMap<PotAddrDepBeg> ReturnedADBs;
+// };
 
 class BFSCtx {
 public:
