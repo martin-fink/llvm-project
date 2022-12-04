@@ -304,8 +304,10 @@ private:
   getValuesForRegister(MachineBasicBlock *MBB, MCRegister Reg,
                        MachineInstr *StartBefore = nullptr) const;
 
-  std::map<MCRegister, std::set<MachineValue>>
-  getValuesForInstruction(const MachineInstr *MI) const;
+  // if map[reg] is not empty, it will be cleared
+  void getValuesForInstruction(
+      const MachineInstr *MI,
+      std::map<MCRegister, std::set<MachineValue>> &Result) const;
 
   void getOutgoingValuesForUnvisitedBlock(
       const MachineBasicBlock *MBB,
@@ -366,8 +368,6 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
   }
 }
 
-// TODO: in order to avoid allocations pass the map with the result as an
-// argument
 void RegisterValueMapping::getOutgoingValuesForUnvisitedBlock(
     const MachineBasicBlock *MBB,
     std::map<MCRegister, std::set<MachineValue>> &Result,
@@ -393,17 +393,31 @@ void RegisterValueMapping::getOutgoingValuesForUnvisitedBlock(
   // since all predecessors have been visited, now we need to walk all
   // instructions and check which registers they write to
   for (auto Iter = MBB->rbegin(); Iter != MBB->rend(); ++Iter) {
-    auto Values = getValuesForInstruction(&*Iter);
-    for (auto &[Reg, Values] : Values) {
-      Result[Reg].clear();
-      Result[Reg].insert(Values.begin(), Values.end());
-    }
+    getValuesForInstruction(&*Iter, Result);
+    // for (auto &[Reg, Values] : Values) {
+    //   Result[Reg].clear();
+    //   Result[Reg].insert(Values.begin(), Values.end());
+    // }
   }
 }
 
-std::map<MCRegister, std::set<MachineValue>>
-RegisterValueMapping::getValuesForInstruction(const MachineInstr *MI) const {
+void RegisterValueMapping::getValuesForInstruction(
+    const MachineInstr *MI,
+    std::map<MCRegister, std::set<MachineValue>> &Result) const {
   auto *TRI = MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
+
+  auto InsertVals = [&](MCRegister Reg, MachineValue Value) {
+    auto SuperReg = getSuperRegister(Reg, TRI);
+
+    if (SuperReg == AArch64::XZR) {
+      return;
+    }
+
+    Result[SuperReg].clear();
+    Result[SuperReg].insert(Value);
+
+    MFDEBUG(errs() << "- def " << TRI->getName(Reg) << "\n";);
+  };
 
   if (MI->isCall()) {
     auto CalledMFOptional = getMachineFunctionFromCall(MI);
@@ -412,84 +426,26 @@ RegisterValueMapping::getValuesForInstruction(const MachineInstr *MI) const {
       auto &CalledF = CalledMF->getFunction();
 
       if (CalledF.getReturnType()->isIntOrPtrTy()) {
-        return {{AArch64::X0, {MachineValue(AArch64::X0)}}};
-      }
-      if (!CalledF.getReturnType()->isVoidTy()) {
+        InsertVals(AArch64::X0, MachineValue(AArch64::X0));
+      } else if (!CalledF.getReturnType()->isVoidTy()) {
         llvm_unreachable("Unsupported return type");
       }
     }
-  }
+  } else {
+    for (auto &Op : MI->operands()) {
+      if (!Op.isReg() || !Op.isDef()) {
+        continue;
+      }
 
-  std::map<MCRegister, std::set<MachineValue>> Ret{};
-  for (auto &Op : MI->operands()) {
-    if (!Op.isReg() || !Op.isDef()) {
-      continue;
+      InsertVals(Op.getReg(), MI);
     }
-
-    auto Reg = getSuperRegister(Op.getReg(), TRI);
-
-    if (Reg == AArch64::XZR) {
-      continue;
-    }
-
-    Ret[Reg].insert(MI);
   }
-
-  return Ret;
 }
 
 void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
   auto *MBB = MI->getParent();
 
-  auto ValuesForInstruction = getValuesForInstruction(MI);
-
-  for (auto &[Reg, Values] : ValuesForInstruction) {
-    RegistersMap[MBB][Reg].clear();
-    RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
-
-    if (MFDEBUG_ENABLED) {
-      auto *TRI =
-          MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
-      errs() << "- def " << TRI->getName(Reg) << "\n";
-    }
-  }
-
-  // auto *TRI = MI->getParent()->getParent()->getSubtarget().getRegisterInfo();
-
-  // for (auto &Op : MI->operands()) {
-  //   if (!Op.isReg() || !Op.isDef()) {
-  //     continue;
-  //   }
-
-  //   auto Reg = getSuperRegister(Op.getReg(), TRI);
-
-  //   if (Reg == AArch64::XZR) {
-  //     continue;
-  //   }
-
-  //   MFDEBUG(errs() << "- def " << TRI->getName(Reg) << "\n";);
-
-  //   RegistersMap[MBB][Reg].clear();
-  //   RegistersMap[MBB][Reg].insert(MI);
-  // }
-
-  // if (MI->isCall()) {
-  //   auto CalledMFOptional = getMachineFunctionFromCall(MI);
-  //   if (!CalledMFOptional.has_value()) {
-  //     return;
-  //   }
-  //   auto *CalledMF = *CalledMFOptional;
-  //   auto &CalledF = CalledMF->getFunction();
-
-  //   if (CalledF.getReturnType()->isIntOrPtrTy()) {
-  //     MFDEBUG(errs() << "- def " << TRI->getName(AArch64::X0) << "\n";);
-
-  //     RegistersMap[MBB][AArch64::X0].clear();
-  //     RegistersMap[MBB][AArch64::X0].insert(MI);
-  //   } else if (!CalledF.getReturnType()->isVoidTy()) {
-  //     llvm_unreachable("Unsupported return type");
-  //   }
-  // }
+  getValuesForInstruction(MI, RegistersMap[MBB]);
 }
 
 std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
