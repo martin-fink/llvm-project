@@ -335,6 +335,9 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
     MFDEBUG(errs() << "entering block for the second time\n";);
   }
 
+  // Make sure RegistersMap[MBB] is initialized
+  RegistersMap[MBB];
+
   // union of all predecessor values
   for (auto *Pred : MBB->predecessors()) {
     auto OutgoingRegisters = RegistersMap.find(Pred);
@@ -458,7 +461,10 @@ std::set<MachineValue> RegisterValueMapping::getValuesForRegister(
 
   auto RegForBlockMap = RegistersMap.find(MBB);
   if (RegForBlockMap == RegistersMap.end()) {
-    llvm_unreachable_internal("Block not visited");
+    errs() << "Block: ";
+    MBB->dump();
+    MBB->getParent()->dump();
+    llvm_unreachable("Block not visited");
   }
   auto Ret = RegForBlockMap->second.find(Reg);
 
