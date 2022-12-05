@@ -1908,7 +1908,7 @@ void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
   errs() << "\nPath to (via files) from annotation: "
          << Beg.getParsedpathTOViaFiles() << "\n";
 
-  errs() << "\nDependnecy Ending:\t" << End.getParsedDepHalfID() << "\n";
+  errs() << "\nDependency Ending:\t" << End.getParsedDepHalfID() << "\n";
   errs() << "\nPath to (via files) from annotation: "
          << End.getParsedpathTOViaFiles() << "\n";
 
