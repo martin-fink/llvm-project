@@ -1263,13 +1263,13 @@ private:
                        std::string &ParsedPathToViaFiles, bool ParsedFullDep);
 
   void updateID(std::string &ID) {
-    if (RemappedIDs.find(ID) != RemappedIDs.end()) {
+    if (RemappedIDs.find(ID) == RemappedIDs.end()) {
       RemappedIDs.emplace(ID, std::unordered_set<std::string>{ID + "-#1"});
-      ID += "-#1";
+      ID = ID + "-#1";
     } else {
       auto S = RemappedIDs.at(ID).size();
       RemappedIDs.at(ID).insert(ID + "-#" + std::to_string(S + 1));
-      ID += "-#" + std::to_string(S + 1);
+      ID = ID + "-#" + std::to_string(S + 1);
     }
   }
 
