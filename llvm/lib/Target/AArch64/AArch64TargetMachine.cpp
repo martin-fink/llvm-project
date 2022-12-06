@@ -837,8 +837,8 @@ void AArch64PassConfig::addPreEmitPass2() {
   // instructions are lowered to bundles as well.
   addPass(createUnpackMachineBundles(nullptr));
 
-  addPass(createCheckDepsPass());
-  addPass(createRemoveLKMMDepAnnotationPass());
+  addPass(createLKMMCheckDepsBackendPass());
+  addPass(createLKMMRemoveDepAnnotationPass());
 }
 
 MachineFunctionInfo *AArch64TargetMachine::createMachineFunctionInfo(

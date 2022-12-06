@@ -101,6 +101,7 @@ void initializeDAHPass(PassRegistry&);
 void initializeDCELegacyPassPass(PassRegistry&);
 void initializeDSELegacyPassPass(PassRegistry&);
 void initializeDeadMachineInstructionElimPass(PassRegistry&);
+void initializeLKMMCheckDepsBackendPass(PassRegistry&);
 void initializeDebugifyMachineModulePass(PassRegistry &);
 void initializeDelinearizationPass(PassRegistry&);
 void initializeDemandedBitsWrapperPassPass(PassRegistry&);

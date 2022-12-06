@@ -1846,15 +1846,19 @@ void BFSCtx::deleteAddrDepDCsAt(MachineBasicBlock *MBB,
   }
 }
 
-class CheckDepsPass : public MachineFunctionPass {
+class LKMMCheckDepsBackend : public MachineFunctionPass {
 public:
   static char ID;
-  CheckDepsPass()
+  LKMMCheckDepsBackend()
       : MachineFunctionPass(ID), BrokenADBs(DepHalfMap<VerAddrDepBeg>()),
         BrokenADEs(DepHalfMap<VerAddrDepEnd>()), RemappedIDs(IDReMap()),
-        VerifiedIDs(std::unordered_set<std::string>()), PrintedBrokenIDs() {}
+        VerifiedIDs(std::unordered_set<std::string>()), PrintedBrokenIDs() {
+    initializeLKMMCheckDepsBackendPass(*PassRegistry::getPassRegistry());
+  }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+  StringRef getPassName() const override { return "LKMMCheckDepsBackend"; }
 
 private:
   // Contains all unverified address dependency beginning annotations.
@@ -1873,11 +1877,11 @@ private:
   void printBrokenDep(VerDepHalf &Beg, VerDepHalf &End, const std::string &ID);
 };
 
-char CheckDepsPass::ID = 0;
+char LKMMCheckDepsBackend::ID = 0;
 
-bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
+bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
   if (!MFDEBUG_ENABLED ||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_beginning_helper" /*||
+      MF.getName().str() == "bpf_selem_unlink_storage_nolock" /*||
       MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" */ /*||
       MF.getName().str() == "doitlk_rr_addr_dep_begin_simple"*/) {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
@@ -1894,7 +1898,7 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
   return false;
 }
 
-void CheckDepsPass::printBrokenDeps() {
+void LKMMCheckDepsBackend::printBrokenDeps() {
   unsigned NotPrintedDeps = 0;
 
   for (auto &VADBP : BrokenADBs) {
@@ -1933,7 +1937,7 @@ void CheckDepsPass::printBrokenDeps() {
   }
 }
 
-void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
+void LKMMCheckDepsBackend::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
                                    const std::string &ID) {
   std::string DepKindStr{""};
 
@@ -1966,10 +1970,10 @@ void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
             "-------===//\n\n";
 }
 
-class RemoveLKMMDepAnnotationPass : public MachineFunctionPass {
+class LKMMRemoveDepAnnotation : public MachineFunctionPass {
 public:
   static char ID;
-  RemoveLKMMDepAnnotationPass() : MachineFunctionPass(ID) {}
+  LKMMRemoveDepAnnotation() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -1978,9 +1982,9 @@ public:
   }
 };
 
-char RemoveLKMMDepAnnotationPass::ID = 0;
+char LKMMRemoveDepAnnotation::ID = 0;
 
-bool RemoveLKMMDepAnnotationPass::runOnMachineFunction(MachineFunction &MF) {
+bool LKMMRemoveDepAnnotation::runOnMachineFunction(MachineFunction &MF) {
 
   for (auto &MBB : MF) {
     for (auto &MI : MBB) {
@@ -2046,11 +2050,13 @@ bool RemoveLKMMDepAnnotationPass::runOnMachineFunction(MachineFunction &MF) {
 
 } // namespace
 
+INITIALIZE_PASS(LKMMCheckDepsBackend, DEBUG_TYPE, "Check broken dependencies", false,
+                false)
+
 #undef DEBUG_TYPE
 
-FunctionPass *llvm::createCheckDepsPass() { return new CheckDepsPass(); }
+FunctionPass *llvm::createLKMMCheckDepsBackendPass() { return new LKMMCheckDepsBackend(); }
 
-
-FunctionPass *llvm::createRemoveLKMMDepAnnotationPass() {
-  return new RemoveLKMMDepAnnotationPass();
+FunctionPass *llvm::createLKMMRemoveDepAnnotationPass() {
+  return new LKMMRemoveDepAnnotation();
 }
