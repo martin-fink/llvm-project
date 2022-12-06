@@ -428,9 +428,24 @@ void RegisterValueMapping::getValuesForInstruction(
       auto *CalledMF = *CalledMFOptional;
       auto &CalledF = CalledMF->getFunction();
 
-      if (CalledF.getReturnType()->isIntOrPtrTy()) {
+      auto *RetTy = CalledF.getReturnType();
+
+      if (RetTy->isIntOrPtrTy()) {
         InsertVals(AArch64::X0, MachineValue(AArch64::X0));
-      } else if (!CalledF.getReturnType()->isVoidTy()) {
+      } else if (RetTy->isArrayTy()) {
+        if (RetTy->getArrayNumElements() > 2 ||
+            !RetTy->getArrayElementType()->isIntOrPtrTy()) {
+          errs() << "Unsupported array type: " << *RetTy << "for function"
+                 << CalledF.getName().str() << "\n";
+          llvm_unreachable("Unsupported array return type");
+        }
+
+        for (unsigned I = 0; I < RetTy->getArrayNumElements(); ++I) {
+          InsertVals(AArch64::X0 + I, MachineValue(AArch64::X0 + I));
+        }
+      } else if (!RetTy->isVoidTy()) {
+        errs() << "Unsupported return type: " << *RetTy << "for function"
+               << CalledF.getName().str() << "\n";
         llvm_unreachable("Unsupported return type");
       }
     }
