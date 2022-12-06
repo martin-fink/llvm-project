@@ -838,7 +838,7 @@ void AArch64PassConfig::addPreEmitPass2() {
   addPass(createUnpackMachineBundles(nullptr));
 
   addPass(createCheckDepsPass());
-  // TODO: add check pass here :)
+  addPass(createRemoveLKMMDepAnnotationPass());
 }
 
 MachineFunctionInfo *AArch64TargetMachine::createMachineFunctionInfo(

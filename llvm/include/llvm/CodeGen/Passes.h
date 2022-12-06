@@ -418,6 +418,7 @@ namespace llvm {
   createUnpackMachineBundles(std::function<bool(const MachineFunction &)> Ftor);
 
   FunctionPass *createCheckDepsPass();
+  FunctionPass *createRemoveLKMMDepAnnotationPass();
 
   /// FinalizeMachineBundles - This pass finalize machine instruction
   /// bundles (created earlier, e.g. during pre-RA scheduling).

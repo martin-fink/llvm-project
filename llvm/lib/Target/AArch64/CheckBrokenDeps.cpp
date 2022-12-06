@@ -1965,7 +1965,92 @@ void CheckDepsPass::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
             "===---------------------------------------------------------------"
             "-------===//\n\n";
 }
-#undef DEBUG_TYPE
+
+class RemoveLKMMDepAnnotationPass : public MachineFunctionPass {
+public:
+  static char ID;
+  RemoveLKMMDepAnnotationPass() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override;
+
+  StringRef getPassName() const override {
+    return "RemoveLKMMDepAnnotationPass";
+  }
+};
+
+char RemoveLKMMDepAnnotationPass::ID = 0;
+
+bool RemoveLKMMDepAnnotationPass::runOnMachineFunction(MachineFunction &MF) {
+
+  for (auto &MBB : MF) {
+    for (auto &MI : MBB) {
+      MDNode *MDN = MI.getPCSections();
+      if (!MDN) {
+        continue;
+      }
+
+      // TODO: only remove pcsections inserted by us
+      MI.setPCSections(MF, nullptr);
+
+      // MDN->dump();
+
+      // TODO: only remove the annotation if it is a LKMM annotation
+      // SmallVector<StringRef, 5> Annotations{};
+      // MDNode *MDN = MI->getPCSections();
+      // if (!MDN) {
+      //   return Annotations;
+      // }
+
+      // for (const MDOperand &MDO : MDN->operands()) {
+      //   if (auto *MD = dyn_cast<MDString>(MDO.get())) {
+      //     Annotations.push_back(MD->getString());
+      //   }
+      // }
+
+      // return Annotations;
+
+      // std::map<StringRef, SmallVector<Constant *>> SectionWithValues{};
+      // StringRef SectionName;
+      // for (const MDOperand &MDO : MDN->operands()) {
+      //   if (auto *MD = dyn_cast<MDString>(MDO.get()); MD) {
+      //     SectionName = MD->getString();
+      //   }
+
+      //   if (auto *MD = dyn_cast<ConstantAsMetadata>(MDO.get()); MD) {
+      //     SectionWithValues[SectionName].push_back(MD->getValue());
+      //   }
+      // }
+
+      // MDBuilder MDB(MF.getFunction().getContext());
+      // SmallVector<MDBuilder::PCSection, 5> NewAnnotations{};
+      // for (auto Section : SectionWithValues) {
+      //   if (Section.first.startswith("LKMM")) {
+      //     continue;
+      //   }
+
+      //   NewAnnotations.push_back({Section.first, Section.second});
+      // }
+
+      // if (NewAnnotations.empty()) {
+      //   MI.setPCSections(MF, nullptr);
+      //   errs() << "null\n";
+      // } else {
+      //   MI.setPCSections(MF, MDB.createPCSections(NewAnnotations));
+      //   MI.getPCSections()->dump();
+      // }
+    }
+  }
+
+  return false;
+}
+
 } // namespace
 
+#undef DEBUG_TYPE
+
 FunctionPass *llvm::createCheckDepsPass() { return new CheckDepsPass(); }
+
+
+FunctionPass *llvm::createRemoveLKMMDepAnnotationPass() {
+  return new RemoveLKMMDepAnnotationPass();
+}
