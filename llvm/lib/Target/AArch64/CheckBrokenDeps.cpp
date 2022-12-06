@@ -1880,6 +1880,8 @@ bool CheckDepsPass::runOnMachineFunction(MachineFunction &MF) {
 }
 
 void CheckDepsPass::printBrokenDeps() {
+  unsigned NotPrintedDeps = 0;
+
   for (auto &VADBP : BrokenADBs) {
     auto ID = VADBP.first;
     // Exclude duplicate IDs by normalising them.
@@ -1900,13 +1902,19 @@ void CheckDepsPass::printBrokenDeps() {
       continue;
     }
 
+    PrintedBrokenIDs.insert(ID);
+
     // broken by middle end, we don't need to print this dependency
     if (VDB.isBrokenByMiddleEnd()) {
-      continue;
+      NotPrintedDeps++;
+    } else {
+      printBrokenDep(VDB, VDE, ID);
     }
+  }
 
-    PrintedBrokenIDs.insert(ID);
-    printBrokenDep(VDB, VDE, ID);
+  if (NotPrintedDeps > 0) {
+    dbgs() << "Not printing " << NotPrintedDeps
+           << " broken deps which were already detected by the middle end\n";
   }
 }
 
