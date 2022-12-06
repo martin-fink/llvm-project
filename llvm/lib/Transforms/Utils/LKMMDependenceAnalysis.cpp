@@ -2473,7 +2473,20 @@ PreservedAnalyses LKMMVerifier::run(Module &M, ModuleAnalysisManager &AM) {
         for (auto &MDAOp : MDA->operands()) {
           if (auto *Annotation = dyn_cast<MDString>(MDAOp.get());
               Annotation->getString().contains("LKMMDep:")) {
-            Annotations.push_back({Annotation->getString(), {}});
+
+            auto ID =
+                Annotation->getString().split(",").second.split(",").first;
+
+            std::string NewAnnotStr{Annotation->getString()};
+
+            // Check if this Dependency has already been printed.
+            if (PrintedBrokenIDs.find(ID.str()) != PrintedBrokenIDs.end()) {
+              NewAnnotStr.append("BrokenInMiddleEnd;");
+            }
+
+            auto *MDStr = MDB.createString(NewAnnotStr);
+
+            Annotations.push_back({MDStr->getString(), {}});
           }
         }
 

@@ -527,6 +527,8 @@ public:
 
   DepKind getKind() const { return Kind; }
 
+  bool isBrokenByMiddleEnd() const { return BrokenByMiddleEnd; }
+
 protected:
   MachineInstr *const MI;
 
@@ -536,10 +538,12 @@ protected:
 
   std::string PathFrom;
 
+  bool BrokenByMiddleEnd;
+
   DepHalf(MachineInstr *MI, std::string ID, std::string PathToViaFiles,
-          DepKind Kind)
+          DepKind Kind, bool BrokenByMiddleEnd)
       : MI(MI), ID(ID), PathToViaFiles(PathToViaFiles), PathFrom("\n"),
-        Kind(Kind){};
+        BrokenByMiddleEnd(BrokenByMiddleEnd), Kind(Kind){};
 
   virtual ~DepHalf() {}
 
@@ -550,13 +554,15 @@ private:
 class PotAddrDepBeg : public DepHalf {
 public:
   PotAddrDepBeg(MachineInstr *MI, std::string ID, std::string PathToViaFiles,
-                MachineValue InstID, bool FDep = true)
+                MachineValue InstID, bool BrokenByMiddleEnd, bool FDep = true)
       : PotAddrDepBeg(MI, ID, PathToViaFiles, DepChain{InstID}, FDep,
-                      MI->getParent()) {}
+                      MI->getParent(), BrokenByMiddleEnd) {}
 
   PotAddrDepBeg(MachineInstr *MI, std::string ID, std::string PathToViaFiles,
-                DepChain DC, bool FDep, MachineBasicBlock *MBB)
-      : DepHalf(MI, ID, PathToViaFiles, DK_AddrBeg), DCM(), FDep(FDep) {
+                DepChain DC, bool FDep, MachineBasicBlock *MBB,
+                bool BrokenByMiddleEnd)
+      : DepHalf(MI, ID, PathToViaFiles, DK_AddrBeg, BrokenByMiddleEnd), DCM(),
+        FDep(FDep) {
     DCM.emplace(MBB, DepChainPair{DC, DC});
   }
 
@@ -995,8 +1001,10 @@ public:
 protected:
   VerDepHalf(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
              std::string PathToViaFiles, std::string ParsedDepHalfID,
-             std::string ParsedPathToViaFiles, DepKind Kind)
-      : DepHalf(MI, DepHalfID, PathToViaFiles, Kind), ParsedID(ParsedID),
+             std::string ParsedPathToViaFiles, DepKind Kind,
+             bool BrokenByMiddleEnd)
+      : DepHalf(MI, DepHalfID, PathToViaFiles, Kind, BrokenByMiddleEnd),
+        ParsedID(ParsedID),
         ParsedDepHalfID(ParsedDepHalfID), ParsedPathToViaFiles{
                                               ParsedPathToViaFiles} {}
 
@@ -1018,9 +1026,9 @@ class VerAddrDepBeg : public VerDepHalf {
 public:
   VerAddrDepBeg(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
                 std::string PathToViaFiles, std::string ParsedPathTo,
-                std::string ParsedPathToViaFiles)
+                std::string ParsedPathToViaFiles, bool BrokenByMiddleEnd)
       : VerDepHalf(MI, ParsedID, DepHalfID, PathToViaFiles, ParsedPathTo,
-                   ParsedPathToViaFiles, DK_VerAddrBeg) {}
+                   ParsedPathToViaFiles, DK_VerAddrBeg, BrokenByMiddleEnd) {}
 
   static bool classof(const DepHalf *VDH) {
     return VDH->getKind() == DK_VerAddrBeg;
@@ -1081,9 +1089,10 @@ class VerAddrDepEnd : public VerDepHalf {
 public:
   VerAddrDepEnd(MachineInstr *MI, std::string ParsedID, std::string DepHalfID,
                 std::string PathToViaFiles, std::string ParsedDepHalfID,
-                std::string ParsedPathToViaFiles, bool ParsedFDep)
+                std::string ParsedPathToViaFiles, bool ParsedFDep,
+                bool BrokenByMiddleEnd)
       : VerDepHalf(MI, ParsedID, DepHalfID, PathToViaFiles, ParsedDepHalfID,
-                   ParsedPathToViaFiles, DK_VerAddrEnd),
+                   ParsedPathToViaFiles, DK_VerAddrEnd, BrokenByMiddleEnd),
         ParsedFDep(ParsedFDep) {}
 
   const bool &getParsedFullDep() const { return ParsedFDep; }
@@ -1231,7 +1240,7 @@ private:
   void handleDepAnnotations(MachineInstr *MI,
                             SmallVector<StringRef, 5> Annotations);
 
-  void parseDepHalfString(StringRef Annot,
+  bool parseDepHalfString(StringRef Annot,
                           SmallVectorImpl<std::string> &AnnotData);
 
   bool handleAddrDepID(std::string const &ID, MachineInstr *MI,
@@ -1580,10 +1589,15 @@ void BFSCtx::handleInstruction(MachineInstr *MI) {
   }
 }
 
-void BFSCtx::parseDepHalfString(StringRef Annot,
+bool BFSCtx::parseDepHalfString(StringRef Annot,
                                 SmallVectorImpl<std::string> &AnnotData) {
-  if (!Annot.consume_back(";")) {
-    return;
+  bool BrokenByMiddleEnd = false;
+  if (Annot.consume_back(";BrokenInMiddleEnd;")) {
+    BrokenByMiddleEnd = true;
+  } else if (Annot.consume_back(";")) {
+    BrokenByMiddleEnd = false;
+  } else {
+    return false;
   }
 
   while (!Annot.empty()) {
@@ -1591,6 +1605,8 @@ void BFSCtx::parseDepHalfString(StringRef Annot,
     AnnotData.push_back(P.first.str());
     Annot = P.second;
   }
+
+  return BrokenByMiddleEnd;
 }
 
 std::string BFSCtx::buildInlineString(MachineInstr *MI) {
@@ -1639,10 +1655,10 @@ bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
       // BFS has seen the beginning ID. If we were to add unconditionally, we
       // might add endings which aren't actually reachable by the corresponding.
       // Such cases may be false positivies.
-      BrokenADEs.emplace(ID,
-                         VerAddrDepEnd(MI, ID, getFullPath(MI),
-                                       getFullPath(MI, true), ParsedDepHalfID,
-                                       ParsedPathToViaFiles, ParsedFullDep));
+      BrokenADEs.emplace(
+          ID, VerAddrDepEnd(MI, ID, getFullPath(MI), getFullPath(MI, true),
+                            ParsedDepHalfID, ParsedPathToViaFiles,
+                            ParsedFullDep, false));
 
       // Identify how the dependency got broken
       if (!ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp))
@@ -1669,7 +1685,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
 
     AnnotData.clear();
 
-    parseDepHalfString(CurrentDepHalfStr, AnnotData);
+    auto BrokenByMiddleEnd = parseDepHalfString(CurrentDepHalfStr, AnnotData);
 
     auto &ParsedDepHalfTypeStr = AnnotData[0];
     auto &ParsedID = AnnotData[1];
@@ -1701,8 +1717,9 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
           updateID(ParsedID);
         }
 
-        ADBs.emplace(ParsedID, PotAddrDepBeg(MI, getFullPath(MI),
-                                             getFullPath(MI, true), MI));
+        ADBs.emplace(ParsedID,
+                     PotAddrDepBeg(MI, getFullPath(MI), getFullPath(MI, true),
+                                   MI, BrokenByMiddleEnd));
 
         if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
           // Assume broken until proven wrong.
@@ -1710,7 +1727,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
           BrokenADBs.emplace(
               ParsedID, VerAddrDepBeg(MI, ParsedID, getFullPath(MI),
                                       getFullPath(MI, true), ParsedDepHalfID,
-                                      ParsedPathToViaFiles));
+                                      ParsedPathToViaFiles, BrokenByMiddleEnd));
         }
       } else if (ParsedDepHalfTypeStr.find("end") != std::string::npos) {
         // If we are able to verify one pair in
@@ -1836,8 +1853,6 @@ private:
 
   std::unordered_set<std::string> PrintedBrokenIDs;
 
-  // std::unordered_set<MachineModule *> PrintedModules;
-
   void printBrokenDeps();
 
   void printBrokenDep(VerDepHalf &Beg, VerDepHalf &End, const std::string &ID);
@@ -1882,6 +1897,11 @@ void CheckDepsPass::printBrokenDeps() {
 
     auto &VDE = VDEP->second;
     if (PrintedBrokenIDs.find(ID) != PrintedBrokenIDs.end()) {
+      continue;
+    }
+
+    // broken by middle end, we don't need to print this dependency
+    if (VDB.isBrokenByMiddleEnd()) {
       continue;
     }
 
