@@ -275,6 +275,12 @@ getMachineFunctionFromCall(const MachineInstr *MI) {
   auto *CalledF = MF->getFunction().getParent()->getFunction(
       FunctionOperand.getGlobal()->getName());
 
+  if (CalledF == nullptr) {
+    // errs() << "Found no function for call\n";
+    // MI->dump();
+    return {};
+  }
+
   return &MMI.getOrCreateMachineFunction(*CalledF);
 }
 
@@ -295,17 +301,16 @@ std::string getCalledFunctionName(MachineInstr *MI) {
 
 class RegisterValueMapping {
 public:
-  RegisterValueMapping(const MachineFunction *MF) : RegistersMap() {
+  RegisterValueMapping(const MachineFunction *MF)
+      : RegistersMap(), WorkingSet() {
     if (MF->getFunction().getNumOperands() > AArch64ArgRegs.size()) {
       llvm_unreachable(
           "Unable to handle functions that pass arguments on the stack");
     }
 
-    auto *EntryBlock = MF->getBlockNumbered(0);
-
     for (unsigned I = 0; I < MF->getFunction().arg_size(); ++I) {
       auto Reg = AArch64ArgRegs[I];
-      RegistersMap[EntryBlock][Reg] = {Reg};
+      WorkingSet[Reg] = {Reg};
     }
   }
 
@@ -315,11 +320,15 @@ public:
 
   void enterBlock(const MachineBasicBlock *MBB);
 
+  void exitBlock(const MachineBasicBlock *MBB);
+
   void visitInstruction(const MachineInstr *MI);
 
 private:
   std::map<const MachineBasicBlock *, std::map<MCRegister, MachineValueSet>>
       RegistersMap;
+
+  std::map<MCRegister, MachineValueSet> WorkingSet;
 
   MachineValueSet
   getValuesForRegister(MachineBasicBlock *MBB, MCRegister Reg,
@@ -330,10 +339,7 @@ private:
   getValuesForInstruction(const MachineInstr *MI,
                           std::map<MCRegister, MachineValueSet> &Result) const;
 
-  void getOutgoingValuesForUnvisitedBlock(
-      const MachineBasicBlock *MBB,
-      std::map<MCRegister, MachineValueSet> &Result,
-      std::set<const MachineBasicBlock *> &Visited) const;
+  void getOutgoingValuesForUnvisitedBlock(const MachineBasicBlock *MBB);
 
   MCRegister getSuperRegister(MCRegister Reg,
                               const TargetRegisterInfo *TRI) const {
@@ -352,29 +358,29 @@ private:
 };
 
 void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
-  // Make sure RegistersMap[MBB] is initialized
+  // Make sure RegistersMap[MBB] is initialized so
+  // getOutgoingValuesForUnvisitedBlock does not visit it
   RegistersMap[MBB];
 
   // union of all predecessor values
   for (auto *Pred : MBB->predecessors()) {
     auto OutgoingRegisters = RegistersMap.find(Pred);
     if (OutgoingRegisters == RegistersMap.end()) {
-      std::map<MCRegister, MachineValueSet> IncomingValues{};
-      std::set<const MachineBasicBlock *> Visited{};
-      getOutgoingValuesForUnvisitedBlock(Pred, IncomingValues, Visited);
+      getOutgoingValuesForUnvisitedBlock(Pred);
+      OutgoingRegisters = RegistersMap.find(Pred);
+    }
+    assert(OutgoingRegisters != RegistersMap.end());
 
-      for (auto &[Reg, Values] : IncomingValues) {
-        RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
-      }
-    } else {
-      for (auto &[Reg, Values] : OutgoingRegisters->second) {
-        RegistersMap[MBB][Reg].insert(Values.begin(), Values.end());
-      }
+    // copy incoming values
+    for (auto &[Reg, Values] : OutgoingRegisters->second) {
+      WorkingSet[Reg].insert(Values.begin(), Values.end());
     }
   }
 
   if (MFDEBUG_ENABLED) {
-    for (auto &[Reg, Values] : RegistersMap[MBB]) {
+    errs() << "entering block " << MBB->getParent()->getName().str() << "::bb."
+           << MBB->getNumber() << "\n";
+    for (auto &[Reg, Values] : WorkingSet) {
       errs()
           << "- reg: "
           << MBB->getParent()->getSubtarget().getRegisterInfo()->getRegAsmName(
@@ -388,35 +394,54 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
   }
 }
 
+void RegisterValueMapping::exitBlock(const MachineBasicBlock *MBB) {
+  // TODO: check if we really need to clear or if we can just return if the
+  // registers map has already been populated
+  RegistersMap[MBB].clear();
+
+  for (auto &[Reg, Vals] : WorkingSet) {
+    RegistersMap[MBB][Reg].insert(Vals.begin(), Vals.end());
+  }
+
+  WorkingSet.clear();
+}
+
 void RegisterValueMapping::getOutgoingValuesForUnvisitedBlock(
-    const MachineBasicBlock *MBB, std::map<MCRegister, MachineValueSet> &Result,
-    std::set<const MachineBasicBlock *> &Visited) const {
-  if (Visited.find(const_cast<MachineBasicBlock *>(MBB)) != Visited.end()) {
+    const MachineBasicBlock *MBB) {
+  if (RegistersMap.find(MBB) != RegistersMap.end()) {
     return;
   }
-  Visited.insert(MBB);
 
-  if (auto ValuesForBlock = RegistersMap.find(MBB);
-      ValuesForBlock != RegistersMap.end()) {
-    for (auto &[Reg, Values] : ValuesForBlock->second) {
-      // I think we don't need to clear the set for the given register and block
-      Result[Reg].insert(Values.begin(), Values.end());
-    }
-    return;
+  // initialize current block
+  RegistersMap[MBB];
+
+  // find values defined in this block
+  std::map<MCRegister, MachineValueSet> InBlockDefinedVals{};
+  for (auto Iter = MBB->begin(); Iter != MBB->end(); ++Iter) {
+    getValuesForInstruction(&*Iter, InBlockDefinedVals);
+  }
+
+  // since there might be a path that runs through this block, registers defined
+  // in this block also need to be considered as possible incoming values.
+  for (auto &[Reg, Vals] : InBlockDefinedVals) {
+    RegistersMap[MBB][Reg].insert(Vals.begin(), Vals.end());
   }
 
   for (auto *Pred : MBB->predecessors()) {
-    getOutgoingValuesForUnvisitedBlock(Pred, Result, Visited);
+    getOutgoingValuesForUnvisitedBlock(Pred);
+
+    auto PrevVals = RegistersMap.find(Pred);
+    assert(PrevVals != RegistersMap.end());
+
+    for (auto &[Reg, Vals] : PrevVals->second) {
+      RegistersMap[MBB][Reg].insert(Vals.begin(), Vals.end());
+    }
   }
 
-  // since all predecessors have been visited, now we need to walk all
-  // instructions and check which registers they write to
-  for (auto Iter = MBB->rbegin(); Iter != MBB->rend(); ++Iter) {
-    getValuesForInstruction(&*Iter, Result);
-    // for (auto &[Reg, Values] : Values) {
-    //   Result[Reg].clear();
-    //   Result[Reg].insert(Values.begin(), Values.end());
-    // }
+  // handle registers defined in this block, as they overwrite incoming values
+  for (auto &[Reg, Vals] : InBlockDefinedVals) {
+    RegistersMap[MBB][Reg].clear();
+    RegistersMap[MBB][Reg].insert(Vals.begin(), Vals.end());
   }
 }
 
@@ -452,6 +477,8 @@ void RegisterValueMapping::getValuesForInstruction(
     }
   } else */
   if (MI->isCall()) {
+    // TODO: handle registers that have been overwritten by function calls
+    // (callee-saved)
     auto CalledMFOptional = getMachineFunctionFromCall(MI);
     if (CalledMFOptional.has_value()) {
       auto *CalledMF = *CalledMFOptional;
@@ -490,9 +517,7 @@ void RegisterValueMapping::getValuesForInstruction(
 }
 
 void RegisterValueMapping::visitInstruction(const MachineInstr *MI) {
-  auto *MBB = MI->getParent();
-
-  getValuesForInstruction(MI, RegistersMap[MBB]);
+  getValuesForInstruction(MI, WorkingSet);
 }
 
 MachineValueSet RegisterValueMapping::getValuesForRegister(
@@ -503,20 +528,11 @@ MachineValueSet RegisterValueMapping::getValuesForRegister(
   auto *TRI = MBB->getParent()->getSubtarget().getRegisterInfo();
   Reg = getSuperRegister(Reg, TRI);
 
-  auto RegForBlockMap = RegistersMap.find(MBB);
-  if (RegForBlockMap == RegistersMap.end()) {
-    errs() << "Block: ";
-    MBB->dump();
-    MBB->getParent()->dump();
-    llvm_unreachable("Block not visited");
-  }
-  auto Ret = RegForBlockMap->second.find(Reg);
-
-  if (Ret == RegForBlockMap->second.end()) {
-    return {};
+  if (auto Vals = WorkingSet.find(Reg); Vals != WorkingSet.end()) {
+    return Vals->second;
   }
 
-  return Ret->second;
+  return {};
 }
 
 MachineValueSet RegisterValueMapping::getValuesForRegisters(MachineInstr *MI) {
@@ -1478,6 +1494,8 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
       visitInstruction(&MI);
     }
   }
+
+  RegisterValueMap.exitBlock(MBB);
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
