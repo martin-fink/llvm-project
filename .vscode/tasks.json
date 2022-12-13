@@ -24,6 +24,16 @@
 		},
 		{
 			"type": "shell",
+			"label": "LLVM Build All",
+			"command": "./doitlk-llvm-build.py",
+			"args": [
+				"build",
+				"all"
+			],
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
 			"label": "LLVM Build",
 			"command": "./proj_bdo_llvm_build.py",
 			"args": [
