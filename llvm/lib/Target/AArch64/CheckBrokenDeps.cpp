@@ -139,6 +139,14 @@ public:
 
   void dump() const;
 
+  bool isInstr() const { return this->Kind == Instruction; }
+  bool isRegArg() const { return this->Kind == RegisterArgument; }
+
+  const MachineInstr *getMI() const {
+    assert(isInstr() && "Called getMI on non-instruction value");
+    return U.MI;
+  }
+
   friend raw_ostream &operator<<(raw_ostream &Os, const MachineValue &Val);
 
   bool operator==(const MachineValue &Other) const {
@@ -239,7 +247,12 @@ SmallVector<StringRef, 5> getLKMMAnnotations(MachineInstr *MI) {
   return Annotations;
 }
 
-std::string getInstLocationString(MachineInstr *MI, bool ViaFile = false) {
+std::string getInstLocationString(MachineValue Val, bool ViaFile = false) {
+  if (!Val.isInstr()) {
+    return "no location";
+  }
+
+  auto *MI = Val.getMI();
   const llvm::DebugLoc &InstDebugLoc = MI->getDebugLoc();
 
   if (!InstDebugLoc) {
@@ -299,6 +312,57 @@ std::string getCalledFunctionName(MachineInstr *MI) {
   return FunctionOperand.getGlobal()->getName().str();
 }
 
+bool isLoadStorePairInstr(const MachineInstr *MI) {
+  switch (MI->getOpcode()) {
+    // TODO: find operands that represent address
+  case AArch64::STPDi:
+  case AArch64::STPDpost:
+  case AArch64::STPDpre:
+  case AArch64::STPQi:
+  case AArch64::STPQpost:
+  case AArch64::STPQpre:
+  case AArch64::STPSi:
+  case AArch64::STPSpost:
+  case AArch64::STPSpre:
+  case AArch64::STPWi:
+  case AArch64::STPWpost:
+  case AArch64::STPWpre:
+  case AArch64::STPXi:
+  case AArch64::STPXpost:
+  case AArch64::STPXpre:
+  case AArch64::LDPDi:
+  case AArch64::LDPDpost:
+  case AArch64::LDPDpre:
+  case AArch64::LDPQi:
+  case AArch64::LDPQpost:
+  case AArch64::LDPQpre:
+  case AArch64::LDPSWi:
+  case AArch64::LDPSWpost:
+  case AArch64::LDPSWpre:
+  case AArch64::LDPSi:
+  case AArch64::LDPSpost:
+  case AArch64::LDPSpre:
+  case AArch64::LDPWi:
+  case AArch64::LDPWpost:
+  case AArch64::LDPWpre:
+  case AArch64::LDPXi:
+  case AArch64::LDPXpost:
+  case AArch64::LDPXpre:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool shouldIgnoreInstruction(const MachineInstr *MI) {
+  switch (MI->getOpcode()) {
+  case AArch64::HINT:
+    return true;
+  default:
+    return false;
+  }
+}
+
 class RegisterValueMapping {
 public:
   RegisterValueMapping(const MachineFunction *MF)
@@ -323,6 +387,8 @@ public:
   void exitBlock(const MachineBasicBlock *MBB);
 
   void visitInstruction(const MachineInstr *MI);
+
+  MachineValueSet getAddressOperands(MachineInstr *MI);
 
 private:
   std::map<const MachineBasicBlock *, std::map<MCRegister, MachineValueSet>>
@@ -374,22 +440,6 @@ void RegisterValueMapping::enterBlock(const MachineBasicBlock *MBB) {
     // copy incoming values
     for (auto &[Reg, Values] : OutgoingRegisters->second) {
       WorkingSet[Reg].insert(Values.begin(), Values.end());
-    }
-  }
-
-  if (MFDEBUG_ENABLED) {
-    errs() << "entering block " << MBB->getParent()->getName().str() << "::bb."
-           << MBB->getNumber() << "\n";
-    for (auto &[Reg, Values] : WorkingSet) {
-      errs()
-          << "- reg: "
-          << MBB->getParent()->getSubtarget().getRegisterInfo()->getRegAsmName(
-                 Reg)
-          << "\n";
-      for (auto &Val : Values) {
-        errs() << "-- ";
-        Val.dump();
-      }
     }
   }
 }
@@ -552,6 +602,229 @@ MachineValueSet RegisterValueMapping::getValuesForRegister(MCRegister Reg,
   return getValuesForRegister(MI->getParent(), Reg, MI);
 }
 
+MachineValueSet RegisterValueMapping::getAddressOperands(MachineInstr *MI) {
+  MachineValueSet AddrOperands{};
+  bool IsStoreLoadPairInst = false;
+  switch (MI->getOpcode()) {
+  case AArch64::STPDi:
+  case AArch64::STPDpost:
+  case AArch64::STPDpre:
+  case AArch64::STPQi:
+  case AArch64::STPQpost:
+  case AArch64::STPQpre:
+  case AArch64::STPSi:
+  case AArch64::STPSpost:
+  case AArch64::STPSpre:
+  case AArch64::STPWi:
+  case AArch64::STPWpost:
+  case AArch64::STPWpre:
+  case AArch64::STPXi:
+  case AArch64::STPXpost:
+  case AArch64::STPXpre:
+    IsStoreLoadPairInst = true;
+    LLVM_FALLTHROUGH;
+  case AArch64::STRBBpost:
+  case AArch64::STRBBpre:
+  case AArch64::STRBBroW:
+  case AArch64::STRBBroX:
+  case AArch64::STRBBui:
+  case AArch64::STRBpost:
+  case AArch64::STRBpre:
+  case AArch64::STRBroW:
+  case AArch64::STRBroX:
+  case AArch64::STRBui:
+  case AArch64::STRDpost:
+  case AArch64::STRDpre:
+  case AArch64::STRDroW:
+  case AArch64::STRDroX:
+  case AArch64::STRDui:
+  case AArch64::STRHHpost:
+  case AArch64::STRHHpre:
+  case AArch64::STRHHroW:
+  case AArch64::STRHHroX:
+  case AArch64::STRHHui:
+  case AArch64::STRHpost:
+  case AArch64::STRHpre:
+  case AArch64::STRHroW:
+  case AArch64::STRHroX:
+  case AArch64::STRHui:
+  case AArch64::STRQpost:
+  case AArch64::STRQpre:
+  case AArch64::STRQroW:
+  case AArch64::STRQroX:
+  case AArch64::STRQui:
+  case AArch64::STRSpost:
+  case AArch64::STRSpre:
+  case AArch64::STRSroW:
+  case AArch64::STRSroX:
+  case AArch64::STRSui:
+  case AArch64::STRWpost:
+  case AArch64::STRWpre:
+  case AArch64::STRWroW:
+  case AArch64::STRWroX:
+  case AArch64::STRWui:
+  case AArch64::STRXpost:
+  case AArch64::STRXpre:
+  case AArch64::STRXroW:
+  case AArch64::STRXroX:
+  case AArch64::STRXui:
+  case AArch64::STURBBi:
+  case AArch64::STURBi:
+  case AArch64::STURDi:
+  case AArch64::STURHHi:
+  case AArch64::STURHi:
+  case AArch64::STURQi:
+  case AArch64::STURSi:
+  case AArch64::STURWi:
+  case AArch64::STURXi: {
+    unsigned NStoreOperands = IsStoreLoadPairInst ? 2 : 1;
+
+    for (unsigned I = NStoreOperands + MI->getNumDefs();
+         I < MI->getNumOperands(); ++I) {
+      auto Op = MI->getOperand(I);
+      if (Op.isReg()) {
+        auto ValsForReg = getValuesForRegister(Op.getReg(), MI);
+
+        AddrOperands.insert(ValsForReg.begin(), ValsForReg.end());
+      }
+    }
+
+    break;
+  }
+  case AArch64::LDPDi:
+  case AArch64::LDPDpost:
+  case AArch64::LDPDpre:
+  case AArch64::LDPQi:
+  case AArch64::LDPQpost:
+  case AArch64::LDPQpre:
+  case AArch64::LDPSWi:
+  case AArch64::LDPSWpost:
+  case AArch64::LDPSWpre:
+  case AArch64::LDPSi:
+  case AArch64::LDPSpost:
+  case AArch64::LDPSpre:
+  case AArch64::LDPWi:
+  case AArch64::LDPWpost:
+  case AArch64::LDPWpre:
+  case AArch64::LDPXi:
+  case AArch64::LDPXpost:
+  case AArch64::LDPXpre:
+    IsStoreLoadPairInst = true;
+    LLVM_FALLTHROUGH;
+  case AArch64::LDRAAindexed:
+  case AArch64::LDRAAwriteback:
+  case AArch64::LDRABindexed:
+  case AArch64::LDRABwriteback:
+  case AArch64::LDRBBpost:
+  case AArch64::LDRBBpre:
+  case AArch64::LDRBBroW:
+  case AArch64::LDRBBroX:
+  case AArch64::LDRBBui:
+  case AArch64::LDRBpost:
+  case AArch64::LDRBpre:
+  case AArch64::LDRBroW:
+  case AArch64::LDRBroX:
+  case AArch64::LDRBui:
+  case AArch64::LDRDl:
+  case AArch64::LDRDpost:
+  case AArch64::LDRDpre:
+  case AArch64::LDRDroW:
+  case AArch64::LDRDroX:
+  case AArch64::LDRDui:
+  case AArch64::LDRHHpost:
+  case AArch64::LDRHHpre:
+  case AArch64::LDRHHroW:
+  case AArch64::LDRHHroX:
+  case AArch64::LDRHHui:
+  case AArch64::LDRHpost:
+  case AArch64::LDRHpre:
+  case AArch64::LDRHroW:
+  case AArch64::LDRHroX:
+  case AArch64::LDRHui:
+  case AArch64::LDRQl:
+  case AArch64::LDRQpost:
+  case AArch64::LDRQpre:
+  case AArch64::LDRQroW:
+  case AArch64::LDRQroX:
+  case AArch64::LDRQui:
+  case AArch64::LDRSBWpost:
+  case AArch64::LDRSBWpre:
+  case AArch64::LDRSBWroW:
+  case AArch64::LDRSBWroX:
+  case AArch64::LDRSBWui:
+  case AArch64::LDRSBXpost:
+  case AArch64::LDRSBXpre:
+  case AArch64::LDRSBXroW:
+  case AArch64::LDRSBXroX:
+  case AArch64::LDRSBXui:
+  case AArch64::LDRSHWpost:
+  case AArch64::LDRSHWpre:
+  case AArch64::LDRSHWroW:
+  case AArch64::LDRSHWroX:
+  case AArch64::LDRSHWui:
+  case AArch64::LDRSHXpost:
+  case AArch64::LDRSHXpre:
+  case AArch64::LDRSHXroW:
+  case AArch64::LDRSHXroX:
+  case AArch64::LDRSHXui:
+  case AArch64::LDRSWl:
+  case AArch64::LDRSWpost:
+  case AArch64::LDRSWpre:
+  case AArch64::LDRSWroW:
+  case AArch64::LDRSWroX:
+  case AArch64::LDRSWui:
+  case AArch64::LDRSl:
+  case AArch64::LDRSpost:
+  case AArch64::LDRSpre:
+  case AArch64::LDRSroW:
+  case AArch64::LDRSroX:
+  case AArch64::LDRSui:
+  case AArch64::LDRWl:
+  case AArch64::LDRWpost:
+  case AArch64::LDRWpre:
+  case AArch64::LDRWroW:
+  case AArch64::LDRWroX:
+  case AArch64::LDRWui:
+  case AArch64::LDRXl:
+  case AArch64::LDRXpost:
+  case AArch64::LDRXpre:
+  case AArch64::LDRXroW:
+  case AArch64::LDRXroX:
+  case AArch64::LDRXui:
+  case AArch64::LDR_PXI:
+  case AArch64::LDR_ZA:
+  case AArch64::LDR_ZXI:
+  case AArch64::LDURBBi:
+  case AArch64::LDURBi:
+  case AArch64::LDURDi:
+  case AArch64::LDURHHi:
+  case AArch64::LDURHi:
+  case AArch64::LDURQi:
+  case AArch64::LDURSBWi:
+  case AArch64::LDURSBXi:
+  case AArch64::LDURSHWi:
+  case AArch64::LDURSHXi:
+  case AArch64::LDURSWi:
+  case AArch64::LDURSi:
+  case AArch64::LDURWi:
+  case AArch64::LDURXi: {
+    auto Vals = getValuesForRegisters(MI);
+    AddrOperands.insert(Vals.begin(), Vals.end());
+    break;
+  }
+  case AArch64::HINT:
+  case AArch64::INLINEASM:
+  case AArch64::INLINEASM_BR:
+    break;
+  default:
+    errs() << "unhandled instruction:";
+    MI->dump();
+    llvm_unreachable("Unhandled load/store instruction");
+  }
+
+  return AddrOperands;
+}
+
 class DepHalf {
 public:
   enum DepKind {
@@ -605,13 +878,8 @@ private:
 class PotAddrDepBeg : public DepHalf {
 public:
   PotAddrDepBeg(MachineInstr *MI, std::string ID, std::string PathToViaFiles,
-                MachineValue InstID, bool BrokenByMiddleEnd, bool FDep = true)
-      : PotAddrDepBeg(MI, ID, PathToViaFiles, DepChain{InstID}, FDep,
-                      MI->getParent(), BrokenByMiddleEnd) {}
-
-  PotAddrDepBeg(MachineInstr *MI, std::string ID, std::string PathToViaFiles,
-                DepChain DC, bool FDep, MachineBasicBlock *MBB,
-                bool BrokenByMiddleEnd)
+                DepChain DC, bool BrokenByMiddleEnd, bool FDep,
+                MachineBasicBlock *MBB)
       : DepHalf(MI, ID, PathToViaFiles, DK_AddrBeg, BrokenByMiddleEnd), DCM(),
         FDep(FDep) {
     DCM.emplace(MBB, DepChainPair{DC, DC});
@@ -631,6 +899,10 @@ public:
   ///
   /// \returns true if the PotAddrDepBeg has dep chains at \p BB.
   bool isAt(MachineBasicBlock *MBB) const { return DCM.find(MBB) != DCM.end(); }
+
+  DepChainPair getDCsAt(MachineBasicBlock *MBB) const {
+    return isAt(MBB) ? DCM.at(MBB) : DepChainPair();
+  }
 
   /// Checks whether this PotAddrDepBeg begins at a given instruction.
   ///
@@ -953,24 +1225,26 @@ bool PotAddrDepBeg::tryAddValueToDepChains(
   if (DCInter.find(InstCmp) != DCInter.end()) {
     DCInter.insert(InstAdd);
     Ret = true;
-  } else if (MI->mayStore()) {
-    for (auto PotRedefOp : RegisterValueMap.getValuesForRegisters(MI)) {
-      if (DCInter.find(PotRedefOp) != DCInter.end()) {
-        DCInter.erase(PotRedefOp);
-      }
-    }
+    // TODO: add remove if storing to a local stack slot
+    // } else if (MI->mayStore()) {
+    //   for (auto PotRedefOp : RegisterValueMap.getAddressOperands(MI)) {
+    //     if (DCInter.find(PotRedefOp) != DCInter.end()) {
+    //       DCInter.erase(PotRedefOp);
+    //     }
+    //   }
   }
 
   // Add to DCUnion and account for redefinition
   if (DCUnion.find(InstCmp) != DCUnion.end()) {
     DCUnion.insert(InstAdd);
     Ret = true;
-  } else if (MI->mayStore()) {
-    for (auto PotRedefOp : RegisterValueMap.getValuesForRegisters(MI)) {
-      if (DCUnion.find(PotRedefOp) != DCUnion.end()) {
-        DCUnion.erase(PotRedefOp);
-      }
-    }
+    // TODO: add remove if storing to a local stack slot
+    // } else if (MI->mayStore()) {
+    //   for (auto PotRedefOp : RegisterValueMap.getValuesForRegisters(MI)) {
+    //     if (DCUnion.find(PotRedefOp) != DCUnion.end()) {
+    //       DCUnion.erase(PotRedefOp);
+    //     }
+    //   }
   }
 
   return Ret;
@@ -1084,6 +1358,12 @@ public:
   static bool classof(const DepHalf *VDH) {
     return VDH->getKind() == DK_VerAddrBeg;
   }
+
+  void setDCP(DepChainPair DCP) { this->DCP = DCP; }
+  DepChainPair &getDCP() { return DCP; }
+
+private:
+  DepChainPair DCP;
 };
 
 void findMachineFunctionBackedges(
@@ -1490,7 +1770,7 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
   RegisterValueMap.enterBlock(MBB);
 
   for (auto &MI : *MBB) {
-    if (!MI.isDebugInstr()) {
+    if (!MI.isDebugInstr() && !shouldIgnoreInstruction(&MI)) {
       visitInstruction(&MI);
     }
   }
@@ -1499,21 +1779,21 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  MFDEBUG(errs() << getInlinedAt(MI) << ": " << *MI;);
+  MFDEBUG(errs() << *MI;);
 
-  if (MI->isCall()) {
+  if (MI->isInlineAsm()) {
+    // TODO: verify everything that runs through this instruction
+  } else if (MI->isCall()) {
     handleCallInst(MI);
-  }
-  if (MI->mayLoadOrStore()) {
+  } else if (MI->mayLoadOrStore()) {
     handleLoadStoreInst(MI);
-  }
-  if (MI->isBranch()) {
+  } else if (MI->isBranch()) {
     handleBranchInst(MI);
-  }
-  if (MI->isReturn()) {
+  } else if (MI->isReturn()) {
     handleReturnInst(MI);
+  } else {
+    handleInstruction(MI);
   }
-  handleInstruction(MI);
 
   RegisterValueMap.visitInstruction(MI);
 }
@@ -1575,83 +1855,14 @@ void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
 
   MachineValueSet Dependencies = RegisterValueMap.getValuesForRegisters(MI);
 
-  bool IsStoreLoadPairInst = false;
-  // MachineValueSet VAdd{};
-  // MachineValueSet VEnd{};
+  bool IsStoreLoadPairInst = isLoadStorePairInstr(MI);
 
-  switch (MI->getOpcode()) {
-    // TODO: find operands that represent address
-  case AArch64::STPDi:
-  case AArch64::STPDpost:
-  case AArch64::STPDpre:
-  case AArch64::STPQi:
-  case AArch64::STPQpost:
-  case AArch64::STPQpre:
-  case AArch64::STPSi:
-  case AArch64::STPSpost:
-  case AArch64::STPSpre:
-  case AArch64::STPWi:
-  case AArch64::STPWpost:
-  case AArch64::STPWpre:
-  case AArch64::STPXi:
-  case AArch64::STPXpost:
-  case AArch64::STPXpre:
-    IsStoreLoadPairInst = true;
-    LLVM_FALLTHROUGH;
-  case AArch64::STRBBpost:
-  case AArch64::STRBBpre:
-  case AArch64::STRBBroW:
-  case AArch64::STRBBroX:
-  case AArch64::STRBBui:
-  case AArch64::STRBpost:
-  case AArch64::STRBpre:
-  case AArch64::STRBroW:
-  case AArch64::STRBroX:
-  case AArch64::STRBui:
-  case AArch64::STRDpost:
-  case AArch64::STRDpre:
-  case AArch64::STRDroW:
-  case AArch64::STRDroX:
-  case AArch64::STRDui:
-  case AArch64::STRHHpost:
-  case AArch64::STRHHpre:
-  case AArch64::STRHHroW:
-  case AArch64::STRHHroX:
-  case AArch64::STRHHui:
-  case AArch64::STRHpost:
-  case AArch64::STRHpre:
-  case AArch64::STRHroW:
-  case AArch64::STRHroX:
-  case AArch64::STRHui:
-  case AArch64::STRQpost:
-  case AArch64::STRQpre:
-  case AArch64::STRQroW:
-  case AArch64::STRQroX:
-  case AArch64::STRQui:
-  case AArch64::STRSpost:
-  case AArch64::STRSpre:
-  case AArch64::STRSroW:
-  case AArch64::STRSroX:
-  case AArch64::STRSui:
-  case AArch64::STRWpost:
-  case AArch64::STRWpre:
-  case AArch64::STRWroW:
-  case AArch64::STRWroX:
-  case AArch64::STRWui:
-  case AArch64::STRXpost:
-  case AArch64::STRXpre:
-  case AArch64::STRXroW:
-  case AArch64::STRXroX:
-  case AArch64::STRXui:
-  case AArch64::STURBBi:
-  case AArch64::STURBi:
-  case AArch64::STURDi:
-  case AArch64::STURHHi:
-  case AArch64::STURHi:
-  case AArch64::STURQi:
-  case AArch64::STURSi:
-  case AArch64::STURWi:
-  case AArch64::STURXi: {
+  if (MI->mayLoad() && MI->mayStore()) {
+    MI->dump();
+    llvm_unreachable("Unable to handle instruction that loads and stores");
+  }
+
+  if (MI->mayStore()) {
     unsigned NStoreOperands = IsStoreLoadPairInst ? 2 : 1;
 
     MachineValueSet StoreVals{};
@@ -1677,148 +1888,12 @@ void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
             // InstCmp is MI, as MI writes to the destination
             for (auto StoreVal : StoreVals) {
               ADB.tryAddValueToDepChains(RegisterValueMap, MI, StoreVal, Val);
-              // MFDEBUG(errs() << "tryAddValueToDepChains: " << *MI << ", "
-              //                << StoreVal << ", " << Val << "\n";);
             }
           }
         }
-
-        // VAdd.insert(ValsForReg.begin(), ValsForReg.end());
-        // VEnd.insert(ValsForReg.begin(), ValsForReg.end());
       }
     }
-
-    break;
-  }
-  case AArch64::LDPDi:
-  case AArch64::LDPDpost:
-  case AArch64::LDPDpre:
-  case AArch64::LDPQi:
-  case AArch64::LDPQpost:
-  case AArch64::LDPQpre:
-  case AArch64::LDPSWi:
-  case AArch64::LDPSWpost:
-  case AArch64::LDPSWpre:
-  case AArch64::LDPSi:
-  case AArch64::LDPSpost:
-  case AArch64::LDPSpre:
-  case AArch64::LDPWi:
-  case AArch64::LDPWpost:
-  case AArch64::LDPWpre:
-  case AArch64::LDPXi:
-  case AArch64::LDPXpost:
-  case AArch64::LDPXpre:
-    IsStoreLoadPairInst = true;
-    LLVM_FALLTHROUGH;
-  case AArch64::LDRAAindexed:
-  case AArch64::LDRAAwriteback:
-  case AArch64::LDRABindexed:
-  case AArch64::LDRABwriteback:
-  case AArch64::LDRBBpost:
-  case AArch64::LDRBBpre:
-  case AArch64::LDRBBroW:
-  case AArch64::LDRBBroX:
-  case AArch64::LDRBBui:
-  case AArch64::LDRBpost:
-  case AArch64::LDRBpre:
-  case AArch64::LDRBroW:
-  case AArch64::LDRBroX:
-  case AArch64::LDRBui:
-  case AArch64::LDRDl:
-  case AArch64::LDRDpost:
-  case AArch64::LDRDpre:
-  case AArch64::LDRDroW:
-  case AArch64::LDRDroX:
-  case AArch64::LDRDui:
-  case AArch64::LDRHHpost:
-  case AArch64::LDRHHpre:
-  case AArch64::LDRHHroW:
-  case AArch64::LDRHHroX:
-  case AArch64::LDRHHui:
-  case AArch64::LDRHpost:
-  case AArch64::LDRHpre:
-  case AArch64::LDRHroW:
-  case AArch64::LDRHroX:
-  case AArch64::LDRHui:
-  case AArch64::LDRQl:
-  case AArch64::LDRQpost:
-  case AArch64::LDRQpre:
-  case AArch64::LDRQroW:
-  case AArch64::LDRQroX:
-  case AArch64::LDRQui:
-  case AArch64::LDRSBWpost:
-  case AArch64::LDRSBWpre:
-  case AArch64::LDRSBWroW:
-  case AArch64::LDRSBWroX:
-  case AArch64::LDRSBWui:
-  case AArch64::LDRSBXpost:
-  case AArch64::LDRSBXpre:
-  case AArch64::LDRSBXroW:
-  case AArch64::LDRSBXroX:
-  case AArch64::LDRSBXui:
-  case AArch64::LDRSHWpost:
-  case AArch64::LDRSHWpre:
-  case AArch64::LDRSHWroW:
-  case AArch64::LDRSHWroX:
-  case AArch64::LDRSHWui:
-  case AArch64::LDRSHXpost:
-  case AArch64::LDRSHXpre:
-  case AArch64::LDRSHXroW:
-  case AArch64::LDRSHXroX:
-  case AArch64::LDRSHXui:
-  case AArch64::LDRSWl:
-  case AArch64::LDRSWpost:
-  case AArch64::LDRSWpre:
-  case AArch64::LDRSWroW:
-  case AArch64::LDRSWroX:
-  case AArch64::LDRSWui:
-  case AArch64::LDRSl:
-  case AArch64::LDRSpost:
-  case AArch64::LDRSpre:
-  case AArch64::LDRSroW:
-  case AArch64::LDRSroX:
-  case AArch64::LDRSui:
-  case AArch64::LDRWl:
-  case AArch64::LDRWpost:
-  case AArch64::LDRWpre:
-  case AArch64::LDRWroW:
-  case AArch64::LDRWroX:
-  case AArch64::LDRWui:
-  case AArch64::LDRXl:
-  case AArch64::LDRXpost:
-  case AArch64::LDRXpre:
-  case AArch64::LDRXroW:
-  case AArch64::LDRXroX:
-  case AArch64::LDRXui:
-  case AArch64::LDR_PXI:
-  case AArch64::LDR_ZA:
-  case AArch64::LDR_ZXI:
-  case AArch64::LDURBBi:
-  case AArch64::LDURBi:
-  case AArch64::LDURDi:
-  case AArch64::LDURHHi:
-  case AArch64::LDURHi:
-  case AArch64::LDURQi:
-  case AArch64::LDURSBWi:
-  case AArch64::LDURSBXi:
-  case AArch64::LDURSHWi:
-  case AArch64::LDURSHXi:
-  case AArch64::LDURSWi:
-  case AArch64::LDURSi:
-  case AArch64::LDURWi:
-  case AArch64::LDURXi: {
-    // bool IsPrePostIncrInstr = MI->getNumDefs() == (IsStoreLoadPairInst ? 3 :
-    // 2);
-
-    // for (unsigned I = IsPrePostIncrInstr ? 1 : 0; I < MI->getNumDefs(); ++I)
-    // {
-    //   auto Op = MI->getOperand(I);
-    //   assert(Op.isDef() && Op.isReg() && "Expected Op to be a register
-    //   definition");
-    // }
-
-    // VAdd.insert(MI);
-
+  } else if (MI->mayLoad()) {
     for (unsigned I = MI->getNumDefs(); I < MI->getNumOperands(); ++I) {
       auto Op = MI->getOperand(I);
       if (Op.isReg()) {
@@ -1829,39 +1904,11 @@ void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
           for (auto Val : ValsForReg) {
             // Val and MI are switched around compared to the store instructions
             ADB.tryAddValueToDepChains(RegisterValueMap, MI, Val, MI);
-            // MFDEBUG(errs() << "tryAddValueToDepChains: " << *MI << ", " <<
-            // Val
-            //                << ", " << *MI << "\n";);
           }
         }
-        // VEnd.insert(ValsForReg.begin(), ValsForReg.end());
       }
     }
-    break;
   }
-  case AArch64::HINT:
-    break;
-  case AArch64::INLINEASM:
-  case AArch64::INLINEASM_BR:
-    // TODO: mark everything as verified if it runs through inline asm
-    break;
-  default:
-    errs() << "unhandled instruction:";
-    MI->dump();
-    // llvm_unreachable("Unhandled load/store instruction");
-  }
-
-  // This is incorrect.
-  // for (auto &[ID, ADB] : ADBs) {
-  //   for (auto &Dep : Dependencies) {
-  //     if (MI->mayStore()) {
-  //       ADB.tryAddValueToDepChains(RegisterValueMap, MI, Dep, Dep);
-  //     }
-  //     if (MI->mayLoad()) {
-  //       ADB.tryAddValueToDepChains(RegisterValueMap, MI, Dep, MI);
-  //     }
-  //   }
-  // }
 }
 
 void BFSCtx::handleBranchInst(MachineInstr *MI) {
@@ -1965,39 +2012,34 @@ bool BFSCtx::handleAddrDepID(std::string const &ID, MachineInstr *MI,
                              std::string &ParsedDepHalfID,
                              std::string &ParsedPathToViaFiles,
                              bool ParsedFullDep) {
+  auto Vals = RegisterValueMap.getAddressOperands(MI);
 
-  // TODO: only get values the instruction is actually reading!
-  // example: STRXroX $xzr, killed renamable $x21, killed renamable $x8, 0, 1
-  // this instruction reads x21 and x8, but not xzr
-  auto Values = RegisterValueMap.getValuesForRegisters(MI);
-
-  for (auto VCmp : Values) {
-    if (ADBs.find(ID) != ADBs.end()) {
-      auto &ADB = ADBs.at(ID);
-
-      // FIXME condition can be shortened
-      if ((ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp)) ||
-          ((!ParsedFullDep && ADB.belongsToDepChain(MBB, VCmp)))) {
-        return true;
-      }
-
-      // We only add the current annotation as a broken ending if the current
-      // BFS has seen the beginning ID. If we were to add unconditionally, we
-      // might add endings which aren't actually reachable by the corresponding.
-      // Such cases may be false positivies.
-      BrokenADEs.emplace(
-          ID, VerAddrDepEnd(MI, ID, getFullPath(MI), getFullPath(MI, true),
-                            ParsedDepHalfID, ParsedPathToViaFiles,
-                            ParsedFullDep, false));
-
-      // Identify how the dependency got broken
-      if (!ParsedFullDep && ADB.belongsToAllDepChains(MBB, VCmp))
-        BrokenADEs.at(ID).setBrokenBy(VerDepHalf::BrokenByType::ParToFull);
-      else if (!ADB.belongsToDepChain(MBB, VCmp))
-        BrokenADEs.at(ID).setBrokenBy(VerDepHalf::BrokenByType::BrokenDC);
-    }
+  auto Iter = ADBs.find(ID);
+  if (Iter == ADBs.end()) {
+    return false;
   }
-  return false;
+  auto &ADB = Iter->second;
+
+  bool BelongsToDepChain = false;
+  for (auto Val : Vals) {
+    BelongsToDepChain |= ADB.belongsToDepChain(MBB, Val);
+  }
+  if (!BelongsToDepChain) {
+    auto &VADB = BrokenADBs.at(ID);
+    auto VADE = VerAddrDepEnd(MI, ID, getFullPath(MI), getFullPath(MI, true),
+                              ParsedDepHalfID, ParsedPathToViaFiles,
+                              ParsedFullDep, false);
+
+    VADB.setDCP(ADB.getDCsAt(MBB));
+    VADE.setBrokenBy(VerDepHalf::BrokenByType::BrokenDC);
+
+    BrokenADEs.emplace(ID, std::move(VADE));
+    return false;
+  }
+
+  // TODO: implement full to partial check
+
+  return true;
 }
 
 void BFSCtx::handleDepAnnotations(MachineInstr *MI,
@@ -2047,9 +2089,11 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
           updateID(ParsedID);
         }
 
+        DepChain DC;
+        DC.insert(MI);
         ADBs.emplace(ParsedID,
                      PotAddrDepBeg(MI, getFullPath(MI), getFullPath(MI, true),
-                                   MI, BrokenByMiddleEnd));
+                                   DC, BrokenByMiddleEnd, true, MBB));
 
         if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
           // Assume broken until proven wrong.
@@ -2195,10 +2239,7 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
-  if (!MFDEBUG_ENABLED ||
-      MF.getName().str() == "bpf_selem_unlink_storage_nolock" /*||
-      MF.getName().str() == "doitlk_rw_addr_dep_begin_call_dep_chain" */ /*||
-      MF.getName().str() == "doitlk_rr_addr_dep_begin_simple"*/) {
+  if (!MFDEBUG_ENABLED || MF.getName().str() == "rcu_gp_cleanup") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
     MFDEBUG(MF.getFunction().dump(););
@@ -2278,11 +2319,24 @@ void LKMMCheckDepsBackend::printBrokenDep(VerDepHalf &Beg, VerDepHalf &End,
     errs() << "\nFull dependency: " << (VADE->getParsedFullDep() ? "yes" : "no")
            << "\n";
 
-  errs() << "Broken " << End.getBrokenBy() << "\n";
+  errs() << "\nBroken " << End.getBrokenBy() << "\n\n";
 
-  errs() << "//"
-            "===---------------------------------------------------------------"
-            "-------===//\n\n";
+  if (auto *VADB = dyn_cast<VerAddrDepBeg>(&Beg)) {
+    auto &DCP = VADB->getDCP();
+    auto &DCInter = DCP.first;
+    auto &DCUnion = DCP.second;
+
+    errs() << "Soure-level dep chains at "
+           << getInstLocationString(End.getInst()) << "\n";
+
+    errs() << "\nIntersection of all dependency chains at the ending:\n";
+    for (auto V : DCInter)
+      errs() << getInstLocationString(V) << "\n";
+
+    errs() << "\nUnion of all dependency chains at the ending:\n";
+    for (auto V : DCUnion)
+      errs() << getInstLocationString(V) << "\n";
+  }
 }
 
 class LKMMRemoveDepAnnotation : public MachineFunctionPass {
