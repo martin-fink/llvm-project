@@ -1562,6 +1562,8 @@ private:
 
   void handleReturnInst(MachineInstr *MI);
 
+  void handleInlineAsmInst(MachineInstr *MI);
+
   void handleInstruction(MachineInstr *MI);
 
   void handleDependentFunctionArgs(MachineInstr *CallInstr,
@@ -1845,7 +1847,7 @@ void BFSCtx::visitInstruction(MachineInstr *MI) {
   MFDEBUG(errs() << *MI;);
 
   if (MI->isInlineAsm()) {
-    // TODO: verify everything that runs through this instruction
+    handleInlineAsmInst(MI);
   } else if (MI->isCall()) {
     handleCallInst(MI);
   } else if (MI->mayLoadOrStore()) {
@@ -1886,7 +1888,8 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
 
   // FIXME: CallI.isIndirectCall() == !CalledF ?
   if (!CalledMF || CalledF.hasExternalLinkage() || CalledF.isIntrinsic() ||
-      CalledF.isVarArg() || CalledMF->empty() || MI->isIndirectBranch()) {
+      CalledF.isVarArg() || CalledMF->empty() || MI->isIndirectBranch() ||
+      CalledF.arg_size() > AArch64ArgRegs.size()) {
     FirstBB = nullptr;
   } else {
     FirstBB = &*CalledMF->begin();
@@ -2011,63 +2014,6 @@ void BFSCtx::handleLoadStoreInst(MachineInstr *MI) {
       }
     }
   }
-
-  // bool IsStoreLoadPairInst = isLoadStorePairInstr(MI);
-
-  // if (MI->mayLoad() && MI->mayStore()) {
-  //   MI->dump();
-  //   llvm_unreachable("Unable to handle instruction that loads and stores");
-  // }
-
-  // if (MI->mayStore()) {
-  //   unsigned NStoreOperands = IsStoreLoadPairInst ? 2 : 1;
-
-  //   MachineValueSet StoreVals{};
-  //   for (unsigned J = 0; J < NStoreOperands; ++J) {
-  //     auto Op = MI->getOperand(J + MI->getNumDefs());
-  //     if (!Op.isReg()) {
-  //       continue;
-  //     }
-
-  //     auto Vals = RegisterValueMap.getValuesForRegister(Op.getReg(), MI);
-  //     StoreVals.insert(Vals.begin(), Vals.end());
-  //   }
-
-  //   for (unsigned I = NStoreOperands + MI->getNumDefs();
-  //        I < MI->getNumOperands(); ++I) {
-  //     auto Op = MI->getOperand(I);
-  //     if (Op.isReg()) {
-  //       auto ValsForReg =
-  //           RegisterValueMap.getValuesForRegister(Op.getReg(), MI);
-
-  //       for (auto &[_, ADB] : ADBs) {
-  //         for (auto Val : ValsForReg) {
-  //           // InstCmp is MI, as MI writes to the destination
-  //           for (auto StoreVal : StoreVals) {
-  //             ADB.tryAddValueToDepChains(RegisterValueMap, MI, StoreVal,
-  //             Val);
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  // } else if (MI->mayLoad()) {
-  //   for (unsigned I = MI->getNumDefs(); I < MI->getNumOperands(); ++I) {
-  //     auto Op = MI->getOperand(I);
-  //     if (Op.isReg()) {
-  //       auto ValsForReg =
-  //           RegisterValueMap.getValuesForRegister(Op.getReg(), MI);
-
-  //       for (auto &[_, ADB] : ADBs) {
-  //         for (auto Val : ValsForReg) {
-  //           // Val and MI are switched around compared to the store
-  //           instructions ADB.tryAddValueToDepChains(RegisterValueMap, MI,
-  //           Val, MI);
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
 }
 
 void BFSCtx::handleBranchInst(MachineInstr *MI) {
@@ -2116,6 +2062,14 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
     for (auto RetVal : ReturnDependencyVals) {
       AddReturnADB(RetVal);
     }
+  }
+}
+
+void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
+  // Since we don't know anything about inline asm instructions, we just verify
+  // anything that runs through them
+  for (auto &[ID, ADB] : ADBs) {
+    markIDAsVerified(ID);
   }
 }
 
@@ -2384,7 +2338,9 @@ void BFSCtx::findDependentArgs(PotAddrDepBeg &ADB, MachineInstr *MI,
   }
 
   if (CalledF->arg_size() > AArch64ArgRegs.size()) {
-    errs() << "Cannot handle function that passes arguments on the stack.\n";
+    MI->dump();
+    errs() << "Cannot handle function that passes arguments on the stack: "
+           << CalledF->getName().str() << "\n";
     return;
   }
 
