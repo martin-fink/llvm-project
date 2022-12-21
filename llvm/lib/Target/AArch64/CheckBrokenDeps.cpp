@@ -1848,6 +1848,7 @@ void BFSCtx::visitInstruction(MachineInstr *MI) {
 
   if (MI->isInlineAsm()) {
     handleInlineAsmInst(MI);
+    handleInstruction(MI);
   } else if (MI->isCall()) {
     handleCallInst(MI);
   } else if (MI->mayLoadOrStore()) {
@@ -2067,6 +2068,9 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
 
 void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
   auto DependentVals = RegisterValueMap.getValuesForRegisters(MI);
+
+  // TODO: we might need to handle dependency annotations on inline assembly instructions
+  // I am not sure if they are actually attached to those.
 
   for (auto &[ID, ADB] : ADBs) {
     bool AnyBelongsToDepChain = false;
@@ -2447,6 +2451,10 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
+  // if (MF.getName().str() != "__mod_lruvec_page_state") {
+  //   return false;
+  // }
+
   if (!MFDEBUG_ENABLED ||
       MF.getName().str() == "doitlk_rw_addr_dep_end_call_beginning") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
@@ -2489,11 +2497,11 @@ void LKMMCheckDepsBackend::printBrokenDeps() {
     PrintedBrokenIDs.insert(ID);
 
     // broken by middle end, we don't need to print this dependency
-    if (VDB.isBrokenByMiddleEnd()) {
-      NotPrintedDeps++;
-    } else {
+    // if (VDB.isBrokenByMiddleEnd()) {
+    //   NotPrintedDeps++;
+    // } else {
       printBrokenDep(VDB, VDE, ID);
-    }
+    // }
   }
 
   if (NotPrintedDeps > 0) {
