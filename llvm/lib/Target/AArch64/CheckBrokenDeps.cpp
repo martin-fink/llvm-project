@@ -2066,10 +2066,18 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
 }
 
 void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
-  // Since we don't know anything about inline asm instructions, we just verify
-  // anything that runs through them
+  auto DependentVals = RegisterValueMap.getValuesForRegisters(MI);
+
   for (auto &[ID, ADB] : ADBs) {
-    markIDAsVerified(ID);
+    bool AnyBelongsToDepChain = false;
+    for (auto Val : DependentVals) {
+      AnyBelongsToDepChain |= ADB.belongsToDepChain(MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTR));
+      AnyBelongsToDepChain |= ADB.belongsToDepChain(MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTE));
+    }
+
+    if (AnyBelongsToDepChain) {
+      markIDAsVerified(ID);
+    }
   }
 }
 
