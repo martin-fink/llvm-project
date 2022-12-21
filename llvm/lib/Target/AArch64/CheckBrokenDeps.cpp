@@ -1886,7 +1886,7 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
 
   // FIXME: CallI.isIndirectCall() == !CalledF ?
   if (!CalledMF || CalledF.hasExternalLinkage() || CalledF.isIntrinsic() ||
-      CalledF.isVarArg() || CalledF.empty() || MI->isIndirectBranch()) {
+      CalledF.isVarArg() || CalledMF->empty() || MI->isIndirectBranch()) {
     FirstBB = nullptr;
   } else {
     FirstBB = &*CalledMF->begin();
