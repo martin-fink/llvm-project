@@ -2069,14 +2069,16 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
 void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
   auto DependentVals = RegisterValueMap.getValuesForRegisters(MI);
 
-  // TODO: we might need to handle dependency annotations on inline assembly instructions
-  // I am not sure if they are actually attached to those.
+  // TODO: we might need to handle dependency annotations on inline assembly
+  // instructions I am not sure if they are actually attached to those.
 
   for (auto &[ID, ADB] : ADBs) {
     bool AnyBelongsToDepChain = false;
     for (auto Val : DependentVals) {
-      AnyBelongsToDepChain |= ADB.belongsToDepChain(MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTR));
-      AnyBelongsToDepChain |= ADB.belongsToDepChain(MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTE));
+      AnyBelongsToDepChain |= ADB.belongsToDepChain(
+          MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTR));
+      AnyBelongsToDepChain |= ADB.belongsToDepChain(
+          MI->getParent(), BackendDCLink(Val, BackendDCLevel::PTE));
     }
 
     if (AnyBelongsToDepChain) {
@@ -2121,24 +2123,27 @@ bool BFSCtx::parseDepHalfString(StringRef Annot,
 }
 
 std::string BFSCtx::buildInlineString(MachineInstr *MI) {
-  auto InstDebugLog = MI->getDebugLoc();
+  auto InstDebugLoc = MI->getDebugLoc();
 
-  if (!InstDebugLog) {
+  if (!InstDebugLoc)
     return "no debug loc when building inline string";
-  }
 
-  std::string InlinePath = InstDebugLog.get()->getFilename().str() + "::" +
-                           std::to_string(InstDebugLog.get()->getLine()) + ":" +
-                           std::to_string(InstDebugLog.get()->getColumn());
+  std::string InlinePath = InstDebugLoc.get()->getFilename().str() +
+                           "::" + std::to_string(InstDebugLoc.getLine()) + ":" +
+                           std::to_string(InstDebugLoc.getCol());
 
-  auto *InlinedAt = InstDebugLog->getInlinedAt();
+  auto *InlinedAt = InstDebugLoc.getInlinedAt();
 
   while (InlinedAt) {
-    // InlinePath = ":" + std::to_string(InlinedAt->getColumn());
-    InlinePath += InlinedAt->getFilename().str() +
-                  "::" + std::to_string(InlinedAt->getLine()) + ":" +
-                  std::to_string(InlinedAt->getColumn());
+    // Column.
+    InlinePath =
+        ":" + std::to_string(InlinedAt->getColumn()) + "  " + InlinePath;
+    // Line.
+    InlinePath = "::" + std::to_string(InlinedAt->getLine()) + InlinePath;
+    // File name.
+    InlinePath = InlinedAt->getFilename().str() + InlinePath;
 
+    // Move to next InlinedAt if it exists.
     InlinedAt = InlinedAt->getInlinedAt();
   }
 
@@ -2246,7 +2251,8 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
     auto InlinePath = buildInlineString(MI);
 
     if (!InlinePath.empty() && !ParsedPathToViaFiles.empty()) {
-      if (InlinePath.length() > ParsedPathToViaFiles.length() ||
+      if ((InlinePath.length() > ParsedPathToViaFiles.length()) ||
+          // Does ParsedPathTo end with InlinePath?
           ParsedPathToViaFiles.compare(ParsedPathToViaFiles.length() -
                                            InlinePath.length(),
                                        InlinePath.length(), InlinePath) != 0) {
@@ -2451,12 +2457,7 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
-  // if (MF.getName().str() != "__mod_lruvec_page_state") {
-  //   return false;
-  // }
-
-  if (!MFDEBUG_ENABLED ||
-      MF.getName().str() == "doitlk_rw_addr_dep_end_call_beginning") {
+  if (!MFDEBUG_ENABLED || MF.getName().str() == "__mod_lruvec_page_state") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
     MFDEBUG(MF.getFunction().dump(););
@@ -2500,7 +2501,7 @@ void LKMMCheckDepsBackend::printBrokenDeps() {
     // if (VDB.isBrokenByMiddleEnd()) {
     //   NotPrintedDeps++;
     // } else {
-      printBrokenDep(VDB, VDE, ID);
+    printBrokenDep(VDB, VDE, ID);
     // }
   }
 
