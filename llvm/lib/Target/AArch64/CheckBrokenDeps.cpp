@@ -33,6 +33,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -51,7 +52,7 @@
 #include <utility>
 
 // TODO: remove this
-#define MFDEBUG_ENABLED 0
+#define MFDEBUG_ENABLED 1
 
 #if MFDEBUG_ENABLED
 #define MFDEBUG(X)                                                             \
@@ -1710,6 +1711,13 @@ void BFSCtx::runBFS() {
   LLVM_DEBUG(dbgs() << "Running BFS on machine function "
                     << MBB->getParent()->getName().str() << "\n";);
 
+  if (MBB->getParent()->getName() == "rwsem_spin_on_owner") {
+    errs() << "here\n";
+    for (auto *Call : CallPath) {
+      Call->dump();
+    }
+  }
+
   BBtoBBSetMap BEDsForBB;
 
   buildBackEdgeMap(&BEDsForBB, MBB->getParent());
@@ -1829,7 +1837,8 @@ InterprocBFSRes BFSCtx::runInterprocBFS(MachineBasicBlock *FirstMBB,
 }
 
 void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
-  MFDEBUG(errs() << "\n\nBlock bb." << MBB->getNumber() << "\n";);
+  MFDEBUG(errs() << "\n\nBlock " << MBB->getParent()->getName() << ".bb."
+                 << MBB->getNumber() << "\n";);
 
   this->MBB = MBB;
   RegisterValueMap.enterBlock(MBB);
@@ -2228,8 +2237,6 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
       continue;
     }
 
-    MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
-
     AnnotData.clear();
 
     auto BrokenByMiddleEnd = parseDepHalfString(CurrentDepHalfStr, AnnotData);
@@ -2259,6 +2266,8 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
         continue;
       }
     }
+
+    MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
 
     if (ParsedDepHalfTypeStr.find("begin") != std::string::npos) {
       if (ADBs.find(ParsedID) != ADBs.end()) {
@@ -2457,7 +2466,7 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
-  if (!MFDEBUG_ENABLED || MF.getName().str() == "__mod_lruvec_page_state") {
+  if (!MFDEBUG_ENABLED || MF.getName().str() == "down_write") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
     MFDEBUG(MF.getFunction().dump(););
@@ -2465,6 +2474,8 @@ bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
     BFSCtx BFSCtx(&*MF.begin(), BrokenADBs, BrokenADEs, RemappedIDs,
                   VerifiedIDs);
     BFSCtx.runBFS();
+
+    errs() << "Broken deps for function " << MF.getName() << ":\n";
 
     printBrokenDeps();
   }
