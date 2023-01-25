@@ -1060,6 +1060,9 @@ public:
   ///
   /// \returns true if all DepChains are at \p BB.
   bool areAllDepChainsAt(MachineBasicBlock *MBB) {
+    if (!isAt(MBB))
+      return false;
+
     return DCM.find(MBB) != DCM.end() && DCM.size() == 1;
   };
 
@@ -1080,13 +1083,6 @@ public:
   /// \param BEDsForBB the back edge destination for \p BB.
   void deleteDCsAt(MachineBasicBlock *MBB,
                    std::unordered_set<MachineBasicBlock *> &BEDs);
-
-  /// Tries to add a value to the intersection of all DepChains at \p BB.
-  ///
-  /// \param BB the BB to whose dep chain intersection \p V should be
-  ///  added.
-  /// \param V the value to be added.
-  void addToDCInter(MachineBasicBlock *MBB, BackendDCLink DCL);
 
   /// Tries to add a value to the union of all dep chains at \p BB.
   ///
@@ -1142,9 +1138,6 @@ public:
     DCM.insert(std::pair{MBB, DepChain{}});
   }
 
-  /// Resets the DepChainMap
-  void clearDCMap() { DCM.clear(); }
-
   /// Returns true if the DepChainMap is completely empty. This is useful for
   /// determining whether a dependency has started in the current function or
   /// was carried over from a previous function where its dependency chain
@@ -1197,7 +1190,7 @@ void PotAddrDepBeg::progressDCPaths(MachineBasicBlock *BB,
   }
 
   if (!isAt(SBB)) {
-    DCM.insert({SBB, DepChain{}});
+    DCM.insert(std::pair{SBB, DepChain{}});
   }
 
   auto &SDC = DCM[SBB];
@@ -1252,15 +1245,6 @@ void PotAddrDepBeg::deleteDCsAt(MachineBasicBlock *MBB,
     // If there's no dead DepChain, erase the DCM entry for the current BB.
     DCM.erase(MBB);
   }
-}
-
-void PotAddrDepBeg::addToDCInter(llvm::MachineBasicBlock *MBB,
-                                 BackendDCLink DCL) {
-  if (!isAt(MBB)) {
-    return;
-  }
-
-  DCM[MBB].insert(DCL);
 }
 
 void PotAddrDepBeg::addToDCUnion(llvm::MachineBasicBlock *MBB,
@@ -1427,11 +1411,11 @@ void findMachineFunctionBackedges(
     std::pair<const MachineBasicBlock *, MachineBasicBlock::const_succ_iterator>
         &Top = VisitStack.back();
     const MachineBasicBlock *ParentMBB = Top.first;
-    MachineBasicBlock::const_succ_iterator &MI = Top.second;
+    MachineBasicBlock::const_succ_iterator &Iter = Top.second;
 
     bool FoundNew = false;
-    while (MI != ParentMBB->succ_end()) {
-      MBB = *MI++;
+    while (Iter != ParentMBB->succ_end()) {
+      MBB = *Iter++;
       if (Visited.insert(MBB).second) {
         FoundNew = true;
         break;
@@ -1711,13 +1695,6 @@ void BFSCtx::runBFS() {
   LLVM_DEBUG(dbgs() << "Running BFS on machine function "
                     << MBB->getParent()->getName().str() << "\n";);
 
-  if (MBB->getParent()->getName() == "rwsem_spin_on_owner") {
-    errs() << "here\n";
-    for (auto *Call : CallPath) {
-      Call->dump();
-    }
-  }
-
   BBtoBBSetMap BEDsForBB;
 
   buildBackEdgeMap(&BEDsForBB, MBB->getParent());
@@ -1837,8 +1814,8 @@ InterprocBFSRes BFSCtx::runInterprocBFS(MachineBasicBlock *FirstMBB,
 }
 
 void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
-  MFDEBUG(errs() << "\n\nBlock " << MBB->getParent()->getName() << ".bb."
-                 << MBB->getNumber() << "\n";);
+  MFDEBUG(errs() << "\nBlock " << MBB->getParent()->getName() << "::bb."
+                 << MBB->getNumber() << "." << MBB->getName() << "\n";);
 
   this->MBB = MBB;
   RegisterValueMap.enterBlock(MBB);
@@ -1853,7 +1830,16 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  MFDEBUG(errs() << *MI;);
+  if (MBB->getParent()->getName() == "rwsem_spin_on_owner") {
+    auto &DebugLoc = MI->getDebugLoc();
+    if (!DebugLoc) {
+      MFDEBUG(errs() << "unknown:0:0: ";);
+    } else {
+      MFDEBUG(errs() << DebugLoc->getFilename() << ":" << DebugLoc->getLine()
+                     << ":" << DebugLoc->getColumn() << ": ";);
+    }
+    MFDEBUG(errs() << *MI;);
+  }
 
   if (MI->isInlineAsm()) {
     handleInlineAsmInst(MI);
@@ -2104,11 +2090,12 @@ void BFSCtx::handleInstruction(MachineInstr *MI) {
 
   for (auto Val : RegisterValueMap.getValuesForRegisters(MI)) {
     DCLCmpsPTR.emplace_back(Val, BackendDCLevel::PTR);
-    DCLCmpsPTE.emplace_back(Val, BackendDCLevel::PTE);
+    DCLCmpsPTE.emplace_back(Val, BackendDCLevel::PTR);
   }
 
   depChainThroughInst(MI, BackendDCLink(MI, BackendDCLevel::PTR), DCLCmpsPTR);
-  depChainThroughInst(MI, BackendDCLink(MI, BackendDCLevel::PTE), DCLCmpsPTE);
+  // depChainThroughInst(MI, BackendDCLink(MI, BackendDCLevel::PTR),
+  // DCLCmpsPTE);
 }
 
 bool BFSCtx::parseDepHalfString(StringRef Annot,
@@ -2267,7 +2254,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
       }
     }
 
-    MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
+    // MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
 
     if (ParsedDepHalfTypeStr.find("begin") != std::string::npos) {
       if (ADBs.find(ParsedID) != ADBs.end()) {
@@ -2282,7 +2269,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
 
       if (ParsedDepHalfTypeStr.find("address dep") != std::string::npos) {
         // Assume broken until proven wrong.
-        // MFDEBUG(errs() << "-- assume broken: " << ParsedID << "\n\n";);
+        // MFDEBUG(errs() << "-- assume broken\n";);
         BrokenADBs->emplace(
             ParsedID, VerAddrDepBeg(MI, ParsedID, getFullPath(MI),
                                     getFullPath(MI, true), ParsedDepHalfID,
@@ -2333,7 +2320,7 @@ void BFSCtx::buildBFSInfo(
     std::unordered_map<MachineBasicBlock *, BFSBBInfo> *BFSInfo,
     BBtoBBSetMap *BEDsForBB, MachineFunction *MF) {
   for (auto &MBB : *MF) {
-    unsigned MaxHits(MBB.pred_size());
+    unsigned MaxHits{MBB.pred_size()};
 
     for (auto *Pred : MBB.predecessors()) {
       if (BEDsForBB->at(Pred).find(&MBB) != BEDsForBB->at(Pred).end()) {
@@ -2365,9 +2352,9 @@ void BFSCtx::findDependentArgs(PotAddrDepBeg &ADB, MachineInstr *MI,
   }
 
   if (CalledF->arg_size() > AArch64ArgRegs.size()) {
-    MI->dump();
-    errs() << "Cannot handle function that passes arguments on the stack: "
-           << CalledF->getName().str() << "\n";
+    // TODO: handle functions that pass their arguments on the stack.
+    // We could do the analysis for the arguments that ar epassed in registers
+    // could be an option
     return;
   }
 

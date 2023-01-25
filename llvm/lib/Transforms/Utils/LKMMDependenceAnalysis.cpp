@@ -1864,6 +1864,11 @@ void BFSCtx::handleCall(CallBase &CallB) {
 }
 
 void BFSCtx::visitLoadInst(LoadInst &LoadI) {
+  // if (LoadI.getParent()->getName() == "lor.lhs.false9") {
+  //   LoadI.dump();
+  //   errs() << "here\n";
+  // }
+
   // Do we need to handle an ending?
   if (auto *VC = dyn_cast<VerCtx>(this))
     if (auto *MDAnnotation = LoadI.getMetadata("annotation"))
