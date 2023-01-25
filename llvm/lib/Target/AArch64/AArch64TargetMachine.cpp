@@ -838,6 +838,7 @@ void AArch64PassConfig::addPreEmitPass2() {
   // instructions are lowered to bundles as well.
   addPass(createUnpackMachineBundles(nullptr));
 
+  addPass(createCountInlineAsmInstructionsPass());
   addPass(createLKMMCheckDepsBackendPass());
   addPass(createLKMMRemoveDepAnnotationPass());
 }

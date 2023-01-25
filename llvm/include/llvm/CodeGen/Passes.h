@@ -419,6 +419,7 @@ namespace llvm {
 
   FunctionPass *createLKMMCheckDepsBackendPass();
   FunctionPass *createLKMMRemoveDepAnnotationPass();
+  FunctionPass *createCountInlineAsmInstructionsPass();
 
   /// FinalizeMachineBundles - This pass finalize machine instruction
   /// bundles (created earlier, e.g. during pre-RA scheduling).
