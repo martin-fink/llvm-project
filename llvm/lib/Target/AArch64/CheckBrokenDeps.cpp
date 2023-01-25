@@ -2639,40 +2639,6 @@ bool LKMMRemoveDepAnnotation::runOnMachineFunction(MachineFunction &MF) {
   return false;
 }
 
-class CountInlineAsmInstructionsPass : public MachineFunctionPass {
-  public:
-  static char ID;
-  CountInlineAsmInstructionsPass() : MachineFunctionPass(ID) {}
-
-  bool runOnMachineFunction(MachineFunction &MF) override;
-
-  StringRef getPassName() const override {
-    return "CountInlineAsmInstructionsPass";
-  }
-};
-
-char CountInlineAsmInstructionsPass::ID = 0;
-
-bool CountInlineAsmInstructionsPass::runOnMachineFunction(MachineFunction &MF) {
-  unsigned InlineAsmInstructions{0};
-  unsigned InlineAsmInstructionsWithSideeffects{0};
-
-  for (auto &MBB : MF) {
-    for (auto &MI : MBB) {
-      if (MI.isInlineAsm()) {
-        InlineAsmInstructions++;
-        if (MI.hasUnmodeledSideEffects()) {}
-        InlineAsmInstructionsWithSideeffects++;
-      }
-    }
-  }
-
-  errs() << "inline assembly instructions for function " << MF.getName() << "\n";
-  errs() << "inline asm instructions (unmodeled/all): " << InlineAsmInstructions << "/" << InlineAsmInstructionsWithSideeffects << "\n";
-
-  return true;
-}
-
 } // namespace
 
 INITIALIZE_PASS(LKMMCheckDepsBackend, DEBUG_TYPE, "Check broken dependencies",
@@ -2686,8 +2652,4 @@ FunctionPass *llvm::createLKMMCheckDepsBackendPass() {
 
 FunctionPass *llvm::createLKMMRemoveDepAnnotationPass() {
   return new LKMMRemoveDepAnnotation();
-}
-
-FunctionPass *llvm::createCountInlineAsmInstructionsPass() {
-  return new CountInlineAsmInstructionsPass();
 }
