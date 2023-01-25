@@ -239,6 +239,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAArch64Target() {
   initializeAArch64LowerHomogeneousPrologEpilogPass(*PR);
   initializeAArch64DAGToDAGISelPass(*PR);
   initializeAArch64GlobalsTaggingPass(*PR);
+  initializeLKMMCheckDepsBackendPass(*PR);
 }
 
 //===----------------------------------------------------------------------===//
