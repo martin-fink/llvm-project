@@ -361,47 +361,6 @@ std::string getCalledFunctionName(MachineInstr *MI) {
   return FunctionOperand.getGlobal()->getName().str();
 }
 
-bool isLoadStorePairInstr(const MachineInstr *MI) {
-  switch (MI->getOpcode()) {
-  case AArch64::STPDi:
-  case AArch64::STPDpost:
-  case AArch64::STPDpre:
-  case AArch64::STPQi:
-  case AArch64::STPQpost:
-  case AArch64::STPQpre:
-  case AArch64::STPSi:
-  case AArch64::STPSpost:
-  case AArch64::STPSpre:
-  case AArch64::STPWi:
-  case AArch64::STPWpost:
-  case AArch64::STPWpre:
-  case AArch64::STPXi:
-  case AArch64::STPXpost:
-  case AArch64::STPXpre:
-  case AArch64::LDPDi:
-  case AArch64::LDPDpost:
-  case AArch64::LDPDpre:
-  case AArch64::LDPQi:
-  case AArch64::LDPQpost:
-  case AArch64::LDPQpre:
-  case AArch64::LDPSWi:
-  case AArch64::LDPSWpost:
-  case AArch64::LDPSWpre:
-  case AArch64::LDPSi:
-  case AArch64::LDPSpost:
-  case AArch64::LDPSpre:
-  case AArch64::LDPWi:
-  case AArch64::LDPWpost:
-  case AArch64::LDPWpre:
-  case AArch64::LDPXi:
-  case AArch64::LDPXpost:
-  case AArch64::LDPXpre:
-    return true;
-  default:
-    return false;
-  }
-}
-
 bool shouldIgnoreInstruction(const MachineInstr *MI) {
   switch (MI->getOpcode()) {
   case AArch64::HINT:
@@ -725,7 +684,10 @@ MachineValueSet RegisterValueMapping::getValueOperands(MachineInstr *MI) {
   case AArch64::STURSi:
   case AArch64::STURWi:
   case AArch64::STURXi: {
-    unsigned NStoreOperands = isLoadStorePairInstr(MI) ? 2 : 1;
+    auto *TII = static_cast<const AArch64InstrInfo *>(
+        MI->getParent()->getParent()->getSubtarget().getInstrInfo());
+
+    unsigned NStoreOperands = TII->isPairedLdSt(*MI) ? 2 : 1;
 
     for (unsigned I = 0; I < NStoreOperands; ++I) {
       auto Op = MI->getOperand(I + MI->getNumDefs());
@@ -745,7 +707,6 @@ MachineValueSet RegisterValueMapping::getValueOperands(MachineInstr *MI) {
 
 MachineValueSet RegisterValueMapping::getPointerOperands(MachineInstr *MI) {
   MachineValueSet PointerOperands{};
-  bool IsStoreLoadPairInst = isLoadStorePairInstr(MI);
   switch (MI->getOpcode()) {
   case AArch64::STPDi:
   case AArch64::STPDpost:
@@ -816,7 +777,10 @@ MachineValueSet RegisterValueMapping::getPointerOperands(MachineInstr *MI) {
   case AArch64::STURSi:
   case AArch64::STURWi:
   case AArch64::STURXi: {
-    unsigned NStoreOperands = IsStoreLoadPairInst ? 2 : 1;
+    auto *TII = static_cast<const AArch64InstrInfo *>(
+        MI->getParent()->getParent()->getSubtarget().getInstrInfo());
+
+    unsigned NStoreOperands = TII->isPairedLdSt(*MI) ? 2 : 1;
 
     for (unsigned I = NStoreOperands + MI->getNumDefs();
          I < MI->getNumOperands(); ++I) {
@@ -827,7 +791,6 @@ MachineValueSet RegisterValueMapping::getPointerOperands(MachineInstr *MI) {
         PointerOperands.insert(ValsForReg.begin(), ValsForReg.end());
       }
     }
-
     break;
   }
   case AArch64::LDPDi:
