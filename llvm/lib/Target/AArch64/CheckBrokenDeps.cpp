@@ -1735,30 +1735,6 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
   }
 }
 
-// DepChain DependentArgs{};
-
-// for (auto &ADBP : ADBs) {
-//   auto &ADB = ADBP.second;
-
-//   bool FDep =
-//       allFunctionArgsPartOfAllDepChains(ADB, CallInstr, DependentArgs);
-
-//   // Instead of deleting an ADB if it doesn't run into a function, we keep it
-//   // with an empty DCM, thereby ensuring that no further items can be added
-//   to
-//   // the DepChain until control flow returns to this function, but still
-//   // allowing an ending to be mapped to it when verifying.
-//   if (DependentArgs.empty()) {
-//     ADB.clearDCMap();
-//   } else {
-//     ADB.resetDCMTo(MBB, FDep, DependentArgs);
-//     ADB.addStepToPathFrom(CallInstr);
-//   }
-
-//   DependentArgs.clear();
-// }
-// }
-
 void BFSCtx::prepareInterproc(MachineBasicBlock *MBB, MachineInstr *CallInstr) {
   handleDependentFunctionArgs(CallInstr, MBB);
 
@@ -1987,10 +1963,6 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
   if (recLevel() == 0) {
     return;
   }
-  // // TODO: when ReturnDependencyVals is empty: what do we do?
-  // if (ReturnDependencyVals.empty()) {
-  //   ReturnDependencyVals.insert(MachineValue(nullptr));
-  // }
 
   auto AddReturnADB = [&](MachineValue RetVal) {
     auto RetLinkPTR = BackendDCLink(RetVal, BackendDCLevel::PTR);
@@ -2001,7 +1973,8 @@ void BFSCtx::handleReturnInst(MachineInstr *MI) {
       auto RetAtPTR = ADB.belongsToDepChain(MBB, RetLinkPTR);
       auto RetAtPTE = ADB.belongsToDepChain(MBB, RetLinkPTE);
       // FIXME: if an ADB is new and gets returned, it is copied twice.
-      ReturnedADB RADB = {std::move(ADB), BackendDCLevel::PLCHLDR,
+      // TODO: check if removing the move is the correct thing to do here
+      ReturnedADB RADB = {ADB, BackendDCLevel::PLCHLDR,
                           InheritedADBs.find(ID) == InheritedADBs.end()};
 
       if (RetAtPTR && RetAtPTE)
@@ -2028,7 +2001,7 @@ void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
   auto DependentVals = RegisterValueMap.getValuesForRegisters(MI);
 
   // TODO: we might need to handle dependency annotations on inline assembly
-  // instructions I am not sure if they are actually attached to those.
+  // instructions. Not sure if they are actually attached to those.
 
   for (auto &[ID, ADB] : ADBs) {
     bool AnyBelongsToDepChain = false;
