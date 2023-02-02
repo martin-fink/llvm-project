@@ -1,0 +1,64 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "LLVM Configure",
+			"command": "./configure.sh",
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
+			"label": "LLVM Build Clang",
+			"command": "ninja",
+			"args": [
+				"-Cbuild",
+				"clang"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"type": "shell",
+			"label": "LLVM Build All",
+			"command": "ninja",
+			"args": [
+				"-Cbuild"
+			],
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
+			"label": "LLVM Build",
+			"command": "ninja",
+			"args": [
+				"-Cbuild",
+				"${input:target}"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"type": "shell",
+			"label": "LLVM Build (nice)",
+			"command": "nice",
+			"args": [
+				"ninja",
+				"-Cbuild",
+				"${input:target}"
+			],
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+	],
+	"inputs": [
+		{
+			"id": "target",
+			"type": "promptString",
+			"description": "CMake Build Target"
+		},
+	]
+}
