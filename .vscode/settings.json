@@ -99,5 +99,6 @@
   },
   "clangd.arguments": [
     "--query-driver=${env:PATH_TO_CLANG}"
-  ]
+  ],
+  "cmake.configureOnOpen": false
 }

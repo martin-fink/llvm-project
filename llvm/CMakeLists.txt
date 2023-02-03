@@ -1353,3 +1353,15 @@ endif()
 if (LLVM_INCLUDE_UTILS AND LLVM_INCLUDE_TOOLS)
   add_subdirectory(utils/llvm-locstats)
 endif()
+
+# Martin project specific setup
+add_custom_target(
+    libclang_rt_builtins ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
+)
+
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
+  COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/ && cp /scratch/martin/src/wasm/wasi-sdk/libclang_rt.builtins-wasm32.a ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMENT "Copying libclang_rt.builtins-wasm32.a..."
+)
