@@ -31,6 +31,8 @@ def FeatureRelaxedSIMD : SubtargetFeature<"relaxed-simd", "SIMDLevel", "RelaxedS
 def FeatureAtomics : SubtargetFeature<"atomics", "HasAtomics", "true",
                                       "Enable Atomics">;
 
+def FeatureMemSafety : SubtargetFeature<"mem-safety", "HasMemSafety", "true", "Enable memory safety">;
+
 def FeatureNontrappingFPToInt :
       SubtargetFeature<"nontrapping-fptoint",
                        "HasNontrappingFPToInt", "true",

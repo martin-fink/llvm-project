@@ -57,6 +57,7 @@ bool WebAssemblyTargetInfo::hasFeature(StringRef Feature) const {
       .Case("tail-call", HasTailCall)
       .Case("reference-types", HasReferenceTypes)
       .Case("extended-const", HasExtendedConst)
+      .Case("mem-safety", HasMemSafety)
       .Default(false);
 }
 
@@ -96,6 +97,8 @@ void WebAssemblyTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__wasm_reference_types__");
   if (HasExtendedConst)
     Builder.defineMacro("__wasm_extended_const__");
+  if (HasMemSafety)
+    Builder.defineMacro("__wasm_mem_safety__");
 
   Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
   Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
@@ -151,6 +154,7 @@ bool WebAssemblyTargetInfo::initFeatureMap(
     Features["atomics"] = true;
     Features["mutable-globals"] = true;
     Features["tail-call"] = true;
+    Features["mem-safety"] = true;
     setSIMDLevel(Features, SIMD128, true);
   } else if (CPU == "generic") {
     Features["sign-ext"] = true;
@@ -257,6 +261,14 @@ bool WebAssemblyTargetInfo::handleTargetFeatures(
     }
     if (Feature == "-extended-const") {
       HasExtendedConst = false;
+      continue;
+    }
+    if (Feature == "+mem-safety") {
+      HasMemSafety = true;
+      continue;
+    }
+    if (Feature == "-mem-safety") {
+      HasMemSafety = false;
       continue;
     }
 

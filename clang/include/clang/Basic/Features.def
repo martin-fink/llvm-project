@@ -51,6 +51,8 @@ FEATURE(memtag_heap,
         LangOpts.Sanitize.has(SanitizerKind::MemtagHeap))
 FEATURE(memtag_globals,
         LangOpts.Sanitize.has(SanitizerKind::MemtagGlobals))
+FEATURE(wasm_memsafety,
+        LangOpts.Sanitize.has(SanitizerKind::WasmMemsafety))
 FEATURE(xray_instrument, LangOpts.XRayInstrument)
 FEATURE(undefined_behavior_sanitizer,
         LangOpts.Sanitize.hasOneOf(SanitizerKind::Undefined))

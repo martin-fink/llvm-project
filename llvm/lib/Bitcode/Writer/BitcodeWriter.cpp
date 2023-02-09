@@ -799,6 +799,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_IMMARG;
   case Attribute::SanitizeMemTag:
     return bitc::ATTR_KIND_SANITIZE_MEMTAG;
+  case Attribute::SanitizeWasmMemSafety:
+    return bitc::ATTR_KIND_SANITIZE_WASM_MEM_SAFETY;
   case Attribute::Preallocated:
     return bitc::ATTR_KIND_PREALLOCATED;
   case Attribute::NoUndef:

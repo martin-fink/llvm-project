@@ -49,6 +49,7 @@ class WebAssemblySubtarget final : public WebAssemblyGenSubtargetInfo {
   bool HasTailCall = false;
   bool HasReferenceTypes = false;
   bool HasExtendedConst = false;
+  bool HasMemSafety = false;
 
   /// What processor and OS we're targeting.
   Triple TargetTriple;
