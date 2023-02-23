@@ -293,6 +293,7 @@ namespace llvm {
       i64x8          = 195,    // 8 Consecutive GPRs (AArch64)
       aarch64svcount = 196,    // AArch64 predicate-as-counter
       spirvbuiltin   = 197,    // SPIR-V's builtin type
+      handle         = 198,    // WebAssembly's handle type
 
       FIRST_VALUETYPE =  1,    // This is always the beginning of the list.
       LAST_VALUETYPE = spirvbuiltin, // This always remains at the end of the list.
@@ -1143,6 +1144,7 @@ namespace llvm {
       case v1024f32:  return TypeSize::Fixed(32768);
       case v2048i32:
       case v2048f32:  return TypeSize::Fixed(65536);
+      case handle:    return TypeSize::Fixed(64);
       case funcref:
       case externref:
       case spirvbuiltin:

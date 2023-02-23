@@ -240,6 +240,8 @@ def aarch64svcount
               : ValueType<16,   196>;  // AArch64 predicate-as-counter
 def spirvbuiltin : ValueType<0,  197>; // SPIR-V's builtin type
 
+def handle    : ValueType<64,   198>;  // WebAssembly's handle type
+
 def token      : ValueType<0, 248>;  // TokenTy
 def MetadataVT : ValueType<0, 249>;  // Metadata
 

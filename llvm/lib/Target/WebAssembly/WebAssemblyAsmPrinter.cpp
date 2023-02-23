@@ -123,6 +123,8 @@ static char getInvokeSig(wasm::ValType VT) {
     return 'F';
   case wasm::ValType::EXTERNREF:
     return 'X';
+  case wasm::ValType::HANDLE:
+    return 'h'; // TODO(martin): use p for pointer instead?
   }
   llvm_unreachable("Unhandled wasm::ValType enum");
 }

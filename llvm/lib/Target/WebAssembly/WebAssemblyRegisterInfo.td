@@ -67,3 +67,4 @@ def V128 : WebAssemblyRegClass<[v4f32, v2f64, v2i64, v4i32, v16i8, v8i16], 128,
                                (add V128_0)>;
 def FUNCREF : WebAssemblyRegClass<[funcref], 0, (add FUNCREF_0)>;
 def EXTERNREF : WebAssemblyRegClass<[externref], 0, (add EXTERNREF_0)>;
+def HANDLE : WebAssemblyRegClass<[handle], 64, (add FP64, SP64, I64_0)>; // TODO(martin): check if regList is correct

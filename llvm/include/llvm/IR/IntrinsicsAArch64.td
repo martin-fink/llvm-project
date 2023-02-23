@@ -890,6 +890,10 @@ def int_aarch64_irg_sp   : DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_i64_ty],
 // Address bits in baseptr and tag bits in ptr0 are ignored.
 // When offset between ptr0 and baseptr is a compile time constant, this can be emitted as
 //   ADDG ptr1, baseptr, (ptr0 - baseptr), tag_offset
+
+// TODO: create tag intrinsics for wasm as well -- check out what exactly those need to do
+// we might need to abstract a bit as we want to be more general
+
 // It is intended that ptr0 is an alloca address, and baseptr is the direct output of llvm.aarch64.irg.sp.
 def int_aarch64_tagp : DefaultAttrsIntrinsic<[llvm_anyptr_ty], [LLVMMatchType<0>, llvm_ptr_ty, llvm_i64_ty],
     [IntrNoMem, ImmArg<ArgIndex<2>>]>;
