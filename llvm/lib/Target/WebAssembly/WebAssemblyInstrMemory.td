@@ -308,3 +308,18 @@ defm SEGMENT_STACK_FREE_A#B : I<(outs), (ins HANDLE:$handle, HANDLE:$sp, rc:$siz
 
 defm : MemoryOps<I32, "32">;
 defm : MemoryOps<I64, "64">;
+
+defm SELECT_HANDLE : I<(outs HANDLE:$dst), (ins HANDLE:$lhs, HANDLE:$rhs, I32:$cond),
+                    (outs), (ins),
+                    [(set HANDLE:$dst, (select I32:$cond, HANDLE:$lhs, HANDLE:$rhs))],
+                    "handle.select\t$dst, $lhs, $rhs, $cond", "handle.select", 0x1b>;
+
+// ISD::SELECT requires its operand to conform to getBooleanContents, but
+// WebAssembly's select interprets any non-zero value as true, so we can fold
+// a setne with 0 into a select.
+def : Pat<(select (i32 (setne I32:$cond, 0)), HANDLE:$lhs, HANDLE:$rhs),
+          (SELECT_HANDLE HANDLE:$lhs, HANDLE:$rhs, I32:$cond)>;
+
+// And again, this time with seteq instead of setne and the arms reversed.
+def : Pat<(select (i32 (seteq I32:$cond, 0)), HANDLE:$lhs, HANDLE:$rhs),
+          (SELECT_HANDLE HANDLE:$rhs, HANDLE:$lhs, I32:$cond)>;

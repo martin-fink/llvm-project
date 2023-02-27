@@ -20,6 +20,7 @@
 #include "Utils/WebAssemblyUtilities.h"
 #include "WebAssembly.h"
 #include "WebAssemblyMachineFunctionInfo.h"
+#include "WebAssemblyRegisterInfo.h"
 #include "WebAssemblySubtarget.h"
 #include "WebAssemblyTargetMachine.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
@@ -146,6 +147,10 @@ private:
     case MVT::v2i64:
     case MVT::v2f64:
       if (Subtarget->hasSIMD128())
+        return VT;
+      break;
+    case MVT::handle:
+      if (Subtarget->hasMemSafety())
         return VT;
       break;
     default:
@@ -713,6 +718,10 @@ bool WebAssemblyFastISel::fastLowerArguments() {
       Opc = WebAssembly::ARGUMENT_externref;
       RC = &WebAssembly::EXTERNREFRegClass;
       break;
+    case MVT::handle:
+      Opc = WebAssembly::ARGUMENT_handle;
+      RC = &WebAssembly::HANDLERegClass;
+      break;
     default:
       return false;
     }
@@ -816,6 +825,9 @@ bool WebAssemblyFastISel::selectCall(const Instruction *I) {
       break;
     case MVT::externref:
       ResultReg = createResultReg(&WebAssembly::EXTERNREFRegClass);
+      break;
+    case MVT::handle:
+      ResultReg = createResultReg(&WebAssembly::HANDLERegClass);
       break;
     default:
       return false;
@@ -955,6 +967,10 @@ bool WebAssemblyFastISel::selectSelect(const Instruction *I) {
   case MVT::externref:
     Opc = WebAssembly::SELECT_EXTERNREF;
     RC = &WebAssembly::EXTERNREFRegClass;
+    break;
+  case MVT::handle:
+    Opc = WebAssembly::SELECT_HANDLE;
+    RC = &WebAssembly::HANDLERegClass;
     break;
   default:
     return false;
@@ -1195,6 +1211,7 @@ bool WebAssemblyFastISel::selectLoad(const Instruction *I) {
 
   // TODO: Fold a following sign-/zero-extend into the load instruction.
 
+  // TODO(martin): update the load here
   unsigned Opc;
   const TargetRegisterClass *RC;
   bool A64 = Subtarget->hasAddr64();
@@ -1223,6 +1240,10 @@ bool WebAssemblyFastISel::selectLoad(const Instruction *I) {
   case MVT::f64:
     Opc = A64 ? WebAssembly::LOAD_F64_A64 : WebAssembly::LOAD_F64_A32;
     RC = &WebAssembly::F64RegClass;
+    break;
+  case MVT::handle:
+    Opc = A64 ? WebAssembly::LOAD_HANDLE_A64 : WebAssembly::LOAD_HANDLE_A32;
+    RC = &WebAssembly::HANDLERegClass;
     break;
   default:
     return false;
@@ -1278,6 +1299,9 @@ bool WebAssemblyFastISel::selectStore(const Instruction *I) {
     break;
   case MVT::f64:
     Opc = A64 ? WebAssembly::STORE_F64_A64 : WebAssembly::STORE_F64_A32;
+    break;
+  case MVT::handle:
+    Opc = A64 ? WebAssembly::STORE_HANDLE_A64 : WebAssembly::STORE_HANDLE_A32;
     break;
   default:
     return false;
@@ -1363,6 +1387,7 @@ bool WebAssemblyFastISel::selectRet(const Instruction *I) {
   case MVT::v2f64:
   case MVT::funcref:
   case MVT::externref:
+  case MVT::handle:
     break;
   default:
     return false;

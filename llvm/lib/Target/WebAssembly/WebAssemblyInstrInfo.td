@@ -367,11 +367,12 @@ defm "" : LOCAL<I32, global_op32>;
 defm "" : LOCAL<I64, global_op64>;  // 64-bit only needed for pointers.
 defm "" : LOCAL<F32, global_op32>;
 defm "" : LOCAL<F64, global_op32>;
-defm "" : LOCAL<HANDLE, global_op64>, Requires<[HasMemSafety]>;
 defm "" : LOCAL<V128, global_op32>, Requires<[HasSIMD128]>;
 defm "" : LOCAL<FUNCREF, global_op32>, Requires<[HasReferenceTypes]>;
 defm "" : LOCAL<EXTERNREF, global_op32>, Requires<[HasReferenceTypes]>;
+defm "" : LOCAL<HANDLE, global_op32>, Requires<[HasMemSafety]>;
 
+// TODO(martin): check if we need to add const handle instructions; probably not, tho
 let isMoveImm = 1, isAsCheapAsAMove = 1, isReMaterializable = 1 in {
 defm CONST_I32 : I<(outs I32:$res), (ins i32imm_op:$imm),
                    (outs), (ins i32imm_op:$imm),
