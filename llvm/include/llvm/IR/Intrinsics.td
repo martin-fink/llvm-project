@@ -362,6 +362,7 @@ def llvm_vararg_ty     : LLVMType<isVoid>;   // this means vararg here
 
 def llvm_externref_ty  : LLVMType<externref>;
 def llvm_funcref_ty    : LLVMType<funcref>;
+def llvm_handle_ty     : LLVMType<handle>;
 
 //===----------------------------------------------------------------------===//
 // Intrinsic Definitions.

@@ -25,6 +25,18 @@ def int_wasm_memory_grow :
   DefaultAttrsIntrinsic<[llvm_anyint_ty], [llvm_i32_ty, LLVMMatchType<0>], []>;
 
 //===----------------------------------------------------------------------===//
+// mem safety instrinsics
+//===----------------------------------------------------------------------===//
+def int_wasm_segment_new :
+  DefaultAttrsIntrinsic<[llvm_handle_ty], [llvm_anyint_ty], []>;
+def int_wasm_segment_free :
+  DefaultAttrsIntrinsic<[], [llvm_handle_ty], []>;
+def int_wasm_segment_stack_new :
+  DefaultAttrsIntrinsic<[llvm_handle_ty], [llvm_handle_ty, llvm_anyint_ty], []>;
+def int_wasm_segment_stack_free :
+  DefaultAttrsIntrinsic<[], [llvm_handle_ty, llvm_handle_ty, llvm_anyint_ty], []>;
+
+//===----------------------------------------------------------------------===//
 // ref.null intrinsics
 //===----------------------------------------------------------------------===//
 def int_wasm_ref_null_extern :

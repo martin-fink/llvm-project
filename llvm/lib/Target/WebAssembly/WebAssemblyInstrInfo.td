@@ -38,9 +38,13 @@ def HasMultivalue :
     Predicate<"Subtarget->hasMultivalue()">,
     AssemblerPredicate<(all_of FeatureMultivalue), "multivalue">;
 
- def HasMemSafety :
-     Predicate<"Subtarget->hasMemSafety()">,
-     AssemblerPredicate<(all_of FeatureMemSafety), "mem-safety">;
+def HasMemSafety :
+    Predicate<"Subtarget->hasMemSafety()">,
+    AssemblerPredicate<(all_of FeatureMemSafety), "mem-safety">;
+
+def HasNoMemSafety :
+    Predicate<"!Subtarget->hasMemSafety()">,
+    AssemblerPredicate<(all_of (not FeatureMemSafety)), "no-mem-safety">;
 
 def HasNontrappingFPToInt :
     Predicate<"Subtarget->hasNontrappingFPToInt()">,
@@ -439,7 +443,6 @@ include "WebAssemblyInstrConv.td"
 include "WebAssemblyInstrFloat.td"
 include "WebAssemblyInstrAtomics.td"
 include "WebAssemblyInstrSIMD.td"
-include "WebAssemblyInstrMemSafety.td"
 include "WebAssemblyInstrRef.td"
 include "WebAssemblyInstrBulkMemory.td"
 include "WebAssemblyInstrTable.td"
