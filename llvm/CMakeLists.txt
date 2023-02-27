@@ -1355,13 +1355,15 @@ if (LLVM_INCLUDE_UTILS AND LLVM_INCLUDE_TOOLS)
 endif()
 
 # Martin project specific setup
-add_custom_target(
-    libclang_rt_builtins ALL
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
+
+ExternalProject_Add(
+    libclang_rt_builtins
+    PREFIX lib/clang/17
+    URL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-19/libclang_rt.builtins-wasm32-wasi-19.0.tar.gz
+    URL_HASH SHA512=db98bdf2d3e47df20066037125b68a21a40decfdcb4275fae0216d4fbf57bf557c135f79ca599c99e30999997f293afda9088cde1f82e733156adcfe2d31fe2b
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    DOWNLOAD_EXTRACT_TIMESTAMP NEW
 )
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
-  COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/ && cp /scratch/martin/src/wasm/wasi-sdk/libclang_rt.builtins-wasm32.a ${CMAKE_CURRENT_BINARY_DIR}/lib/clang/17/lib/wasi/libclang_rt.builtins-wasm32.a
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Copying libclang_rt.builtins-wasm32.a..."
-)
