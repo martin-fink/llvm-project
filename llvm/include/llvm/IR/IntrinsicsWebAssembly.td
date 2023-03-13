@@ -36,6 +36,12 @@ def int_wasm_segment_stack_new :
 def int_wasm_segment_stack_free :
   DefaultAttrsIntrinsic<[], [llvm_handle_ty, llvm_handle_ty, llvm_anyint_ty], []>;
 
+// codegen-only intrinsics for mem safety
+
+// TOOO(martin): check if the intrinsic actually is no-mem and has side effects
+def int_wasm_segment_stack_sp :
+  DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_anyint_ty], [IntrHasSideEffects]>;
+
 //===----------------------------------------------------------------------===//
 // ref.null intrinsics
 //===----------------------------------------------------------------------===//

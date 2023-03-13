@@ -1163,6 +1163,8 @@ SanitizerMask ToolChain::getSupportedSanitizers() const {
     Res |= SanitizerKind::ShadowCallStack;
   if (getTriple().isAArch64(64))
     Res |= SanitizerKind::MemTag;
+  if (getTriple().isWasm())
+    Res |= SanitizerKind::WasmMemsafety;
   return Res;
 }
 

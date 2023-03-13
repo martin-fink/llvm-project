@@ -16,6 +16,7 @@
 #include "Utils/WebAssemblyTypeUtilities.h"
 #include "Utils/WebAssemblyUtilities.h"
 #include "WebAssemblyMachineFunctionInfo.h"
+#include "WebAssemblyRegisterInfo.h"
 #include "WebAssemblySubtarget.h"
 #include "WebAssemblyTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -35,6 +36,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
@@ -45,7 +47,8 @@ using namespace llvm;
 WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     const TargetMachine &TM, const WebAssemblySubtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
-  auto MVTPtr = Subtarget->hasAddr64() ? MVT::i64 : MVT::i32;
+  // TODO(martin): check if this is correct here
+  auto MVTPtr = Subtarget->hasMemSafety() ? MVT::handle : Subtarget->hasAddr64() ? MVT::i64 : MVT::i32;
 
   // Booleans always contain 0 or 1.
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -73,6 +76,8 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     addRegisterClass(MVT::externref, &WebAssembly::EXTERNREFRegClass);
     addRegisterClass(MVT::funcref, &WebAssembly::FUNCREFRegClass);
   }
+  if (Subtarget->hasMemSafety())
+    addRegisterClass(MVT::handle, &WebAssembly::HANDLERegClass);
   // Compute derived properties from the register classes.
   computeRegisterProperties(Subtarget->getRegisterInfo());
 

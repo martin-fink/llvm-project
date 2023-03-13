@@ -114,6 +114,9 @@ public:
   bool hasMemtagGlobals() const {
     return Sanitizers.has(SanitizerKind::MemtagGlobals);
   }
+  bool hasWasmMemSafety() const {
+    return Sanitizers.has(SanitizerKind::WasmMemsafety);
+  }
   const std::string &getMemtagMode() const {
     assert(!MemtagMode.empty());
     return MemtagMode;

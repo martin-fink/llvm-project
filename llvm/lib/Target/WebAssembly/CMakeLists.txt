@@ -51,6 +51,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyRuntimeLibcallSignatures.cpp
   WebAssemblySelectionDAGInfo.cpp
   WebAssemblySetP2AlignOperands.cpp
+  WebAssemblyStackTagging.cpp
   WebAssemblySortRegion.cpp
   WebAssemblyMemIntrinsicResults.cpp
   WebAssemblySubtarget.cpp

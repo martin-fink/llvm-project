@@ -29,6 +29,7 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LowerAtomicPass.h"
@@ -460,6 +461,9 @@ void WebAssemblyPassConfig::addIRPasses() {
 
   // Expand indirectbr instructions to switches.
   addPass(createIndirectBrExpandPass());
+
+  addPass(
+      createWebAssemblyStackTaggingPass(TM->getOptLevel() == CodeGenOpt::None));
 
   TargetPassConfig::addIRPasses();
 }

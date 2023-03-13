@@ -1775,6 +1775,7 @@ TEST(TargetParserTest, AArch64ArchExtFeature) {
       {"rcpc", "norcpc", "+rcpc", "-rcpc"},
       {"rng", "norng", "+rand", "-rand"},
       {"memtag", "nomemtag", "+mte", "-mte"},
+      // {"mem-safety", "no-mem-safety", "+mem-safety", "-mem-safety"},
       {"tme", "notme", "+tme", "-tme"},
       {"pauth", "nopauth", "+pauth", "-pauth"},
       {"ssbs", "nossbs", "+ssbs", "-ssbs"},

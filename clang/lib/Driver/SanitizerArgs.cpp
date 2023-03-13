@@ -14,9 +14,11 @@
 #include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/Option/Option.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SpecialCaseList.h"
 #include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
 #include "llvm/TargetParser/RISCVTargetParser.h"
 #include "llvm/TargetParser/TargetParser.h"
@@ -1094,6 +1096,23 @@ static bool hasTargetFeatureMTE(const llvm::opt::ArgStringList &CmdArgs) {
   return false;
 }
 
+static bool hasTargetFeatureWasmMemSafety(const llvm::opt::ArgStringList &CmdArgs) {
+  for (auto Start = CmdArgs.begin(), End = CmdArgs.end(); Start != End;
+       ++Start) {
+    llvm::errs() << *Start << "\n";
+  }
+  for (auto Start = CmdArgs.begin(), End = CmdArgs.end(); Start != End;
+       ++Start) {
+    const auto *It = std::find(Start, End, StringRef("+mem-safety"));
+    if (It == End)
+      break;
+    if (It > Start && *std::prev(It) == StringRef("-target-feature"))
+      return true;
+    Start = It;
+  }
+  return false;
+}
+
 void SanitizerArgs::addArgs(const ToolChain &TC, const llvm::opt::ArgList &Args,
                             llvm::opt::ArgStringList &CmdArgs,
                             types::ID InputType) const {
@@ -1346,6 +1365,10 @@ void SanitizerArgs::addArgs(const ToolChain &TC, const llvm::opt::ArgList &Args,
   if (Sanitizers.has(SanitizerKind::MemtagStack) &&
       !hasTargetFeatureMTE(CmdArgs))
     TC.getDriver().Diag(diag::err_stack_tagging_requires_hardware_feature);
+
+  if (Sanitizers.has(SanitizerKind::WasmMemsafety) &&
+      !hasTargetFeatureWasmMemSafety(CmdArgs))
+      TC.getDriver().Diag(diag::err_wasm_mem_safety_requires_wasm_extension);
 }
 
 SanitizerMask parseArgValues(const Driver &D, const llvm::opt::Arg *A,
