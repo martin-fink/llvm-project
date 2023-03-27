@@ -11,7 +11,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/clang",
             "args": "${input:CompileCmdArgs}",
-            "cwd": "${env:LINUX}",
+            "cwd": "../linux",
             "terminal": "console",
             "postDebugTask": "removCompileArgsFile"
         },
@@ -22,7 +22,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/clang",
             "args": "",
-            "cwd": "${env:LINUX}",
+            "cwd": "../linux",
             "terminal": "console",
         }
     ],
