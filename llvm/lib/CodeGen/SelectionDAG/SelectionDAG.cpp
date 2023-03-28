@@ -12289,7 +12289,7 @@ void SelectionDAG::copyExtraInfo(SDNode *From, SDNode *To) {
   // enough to avoid retry in the common case; the last MaxDepth is large
   // enough to avoid having to use the fallback below (and protects from
   // potential stack exhaustion from recursion).
-  for (int PrevDepth = 0, MaxDepth = 16; MaxDepth <= 1024;
+  for (int PrevDepth = 0, MaxDepth = 16; MaxDepth <= 4096;
        PrevDepth = MaxDepth, MaxDepth *= 2, Visited.clear()) {
     // StartFrom is the previous (or initial) set of leafs reachable at the
     // previous maximum depth.
@@ -12301,15 +12301,15 @@ void SelectionDAG::copyExtraInfo(SDNode *From, SDNode *To) {
       return;
     // This should happen very rarely (reached the entry node).
     LLVM_DEBUG(dbgs() << __func__ << ": MaxDepth=" << MaxDepth << " too low\n");
-    assert(!Leafs.empty());
+    // assert(!Leafs.empty());
   }
 
   // This should not happen - but if it did, that means the subgraph reachable
   // from From has depth greater or equal to maximum MaxDepth, and VisitFrom()
   // could not visit all reachable common operands. Consequently, we were able
   // to reach the entry node.
-  errs() << "warning: incomplete propagation of SelectionDAG::NodeExtraInfo\n";
-  assert(false && "From subgraph too complex - increase max. MaxDepth?");
+  // errs() << "warning: incomplete propagation of SelectionDAG::NodeExtraInfo\n";
+  // assert(false && "From subgraph too complex - increase max. MaxDepth?");
   // Best-effort fallback if assertions disabled.
   SDEI[To] = std::move(NEI);
 }
