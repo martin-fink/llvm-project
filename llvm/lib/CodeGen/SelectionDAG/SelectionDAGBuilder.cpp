@@ -5957,6 +5957,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         /* AlwaysInline */ false, isTC, MachinePointerInfo(I.getArgOperand(0)),
         MachinePointerInfo(I.getArgOperand(1)), I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memcpy_inline: {
@@ -5978,6 +5979,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         /* AlwaysInline */ true, isTC, MachinePointerInfo(I.getArgOperand(0)),
         MachinePointerInfo(I.getArgOperand(1)), I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memset: {
@@ -5994,6 +5996,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         Root, sdl, Op1, Op2, Op3, Alignment, isVol, /* AlwaysInline */ false,
         isTC, MachinePointerInfo(I.getArgOperand(0)), I.getAAMetadata());
     updateDAGForMaybeTailCall(MS);
+    setValue(&I, MS);
     return;
   }
   case Intrinsic::memset_inline: {
@@ -6012,6 +6015,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                                MachinePointerInfo(I.getArgOperand(0)),
                                I.getAAMetadata());
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memmove: {
@@ -6033,6 +6037,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                                 MachinePointerInfo(I.getArgOperand(1)),
                                 I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MM);
+    setValue(&I, MM);
     return;
   }
   case Intrinsic::memcpy_element_unordered_atomic: {
@@ -6049,6 +6054,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                             isTC, MachinePointerInfo(MI.getRawDest()),
                             MachinePointerInfo(MI.getRawSource()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memmove_element_unordered_atomic: {
@@ -6065,6 +6071,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                              isTC, MachinePointerInfo(MI.getRawDest()),
                              MachinePointerInfo(MI.getRawSource()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memset_element_unordered_atomic: {
@@ -6080,6 +6087,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         DAG.getAtomicMemset(getRoot(), sdl, Dst, Val, Length, LengthTy, ElemSz,
                             isTC, MachinePointerInfo(MI.getRawDest()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::call_preallocated_setup: {
