@@ -561,7 +561,7 @@ void RegisterValueMapping::getValuesForInstruction(
       auto *RetTy = CalledF.getReturnType();
 
       if (RetTy->isIntOrPtrTy()) {
-        InsertVals(AArch64::X0, MachineValue(AArch64::X0));
+        InsertVals(AArch64::X0, MachineValue(MI));
       } else if (RetTy->isArrayTy()) {
         if (RetTy->getArrayNumElements() > 2 ||
             !RetTy->getArrayElementType()->isIntOrPtrTy()) {
@@ -571,7 +571,7 @@ void RegisterValueMapping::getValuesForInstruction(
         }
 
         for (unsigned I = 0; I < RetTy->getArrayNumElements(); ++I) {
-          InsertVals(AArch64::X0 + I, MachineValue(AArch64::X0 + I));
+          InsertVals(AArch64::X0 + I, MachineValue(MI));
         }
       } else if (!RetTy->isVoidTy()) {
         errs() << "Unsupported return type: " << *RetTy << "for function"
@@ -1821,7 +1821,7 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  if (MBB->getParent()->getName() == "rwsem_spin_on_owner") {
+  if (MBB->getParent()->getName() == "rw_addr_dep_end_beg_and_end_in_calls ") {
     auto &DebugLoc = MI->getDebugLoc();
     if (!DebugLoc) {
       MFDEBUG(errs() << "unknown:0:0: ";);
@@ -2532,7 +2532,7 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
-  if (!MFDEBUG_ENABLED || MF.getName().str() == "down_write") {
+  if (!MFDEBUG_ENABLED || MF.getName().str() == "rw_addr_dep_end_beg_and_end_in_calls") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
     MFDEBUG(MF.getFunction().dump(););
