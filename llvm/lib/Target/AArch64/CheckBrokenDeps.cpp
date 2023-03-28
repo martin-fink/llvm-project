@@ -361,21 +361,6 @@ getMachineFunctionFromCall(const MachineInstr *MI) {
   return &MMI.getOrCreateMachineFunction(*CalledF);
 }
 
-string getCalledFunctionName(MachineInstr *MI) {
-  if (!MI->isCall()) {
-    errs() << "getCalledFunctionName called on non call instruction\n";
-    return "";
-  }
-
-  auto &FunctionOperand = MI->getOperand(0);
-  if (!FunctionOperand.isGlobal()) {
-    errs() << "getCalledFunctionName called on invalid call instruction\n";
-    return "";
-  }
-
-  return FunctionOperand.getGlobal()->getName().str();
-}
-
 bool shouldIgnoreInstruction(const MachineInstr *MI) {
   switch (MI->getOpcode()) {
   case AArch64::HINT:
