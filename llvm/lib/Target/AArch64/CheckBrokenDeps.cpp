@@ -2133,16 +2133,12 @@ void BFSCtx::handleInlineAsmInst(MachineInstr *MI) {
 // checker, as any instruction may function as a phi node in the backend.
 void BFSCtx::handleInstruction(MachineInstr *MI) {
   SmallVector<BackendDCLink, 6> DCLCmpsPTR;
-  SmallVector<BackendDCLink, 6> DCLCmpsPTE;
 
   for (auto Val : RegisterValueMap.getValuesForRegisters(MI)) {
-    DCLCmpsPTR.emplace_back(Val, BackendDCLevel::PTR);
-    DCLCmpsPTE.emplace_back(Val, BackendDCLevel::PTR);
+    DCLCmpsPTR.emplace_back(BackendDCLink(Val, BackendDCLevel::PTR));
   }
 
   depChainThroughInst(MI, BackendDCLink(MI, BackendDCLevel::PTR), DCLCmpsPTR);
-  // depChainThroughInst(MI, BackendDCLink(MI, BackendDCLevel::PTR),
-  // DCLCmpsPTE);
 }
 
 bool BFSCtx::parseDepHalfString(StringRef Annot,
