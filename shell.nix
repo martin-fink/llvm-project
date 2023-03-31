@@ -22,6 +22,7 @@ pkgs.llvmPackages_latest.stdenv.mkDerivation {
     pkgs.llvmPackages_latest.lld
     pkgs.llvmPackages_latest.lldb
     pkgs.pkg-config
+    pkgs.mold
   ];
   buildInputs = [ pkgs.zlib ];
   hardeningDisable = [ "all" ];

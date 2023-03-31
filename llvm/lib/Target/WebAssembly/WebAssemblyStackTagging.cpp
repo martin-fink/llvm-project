@@ -77,16 +77,15 @@ public:
   StringRef getPassName() const override { return "WebAssembly Stack Tagging"; }
 
 private:
-  Function *F = nullptr;
-  Function *NewSegmentStackFunc = nullptr;
-  const DataLayout *DL = nullptr;
-  // AAResults *AA = nullptr;
-  const StackSafetyGlobalInfo *SSI = nullptr;
+  // Function *F = nullptr;
+  // Function *NewSegmentStackFunc = nullptr;
+  // const DataLayout *DL = nullptr;
+  // // AAResults *AA = nullptr;
+  // const StackSafetyGlobalInfo *SSI = nullptr;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
-    // if (UseStackSafety)
-    AU.addRequired<StackSafetyGlobalInfoWrapperPass>();
+    // AU.addRequired<StackSafetyGlobalInfoWrapperPass>();
     // if (MergeInit)
     // AU.addRequired<AAResultsWrapperPass>();
   }
@@ -96,82 +95,30 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
   if (!F.hasFnAttribute(Attribute::SanitizeWasmMemSafety))
     return false;
 
-  // only do this if we use stack safety
-  SSI = &getAnalysis<StackSafetyGlobalInfoWrapperPass>().getResult();
-  this->F = &F;
-  this->DL = &F.getParent()->getDataLayout();
+  DataLayout DL = F.getParent()->getDataLayout();
 
-  memtag::StackInfoBuilder SIB(SSI);
-  for (Instruction &I : instructions(F))
-    SIB.visit(I);
-  memtag::StackInfo &SInfo = SIB.get();
+  SmallVector<AllocaInst *, 8> AllocaInsts;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      if (auto *Alloca = dyn_cast<AllocaInst>(&I)) {
+        LLVM_DEBUG(dbgs() << "Checking alloca: " << *Alloca << "\n");
+        auto AllocationSize = Alloca->getAllocationSize(DL);
+        if (!AllocationSize) {
+          LLVM_DEBUG(dbgs() << "Allocation size not known, skipping alloca\n");
+          continue;
+        }
 
-  if (SInfo.AllocasToInstrument.empty())
-    return false;
-
-  std::unique_ptr<DominatorTree> DeleteDT;
-  DominatorTree *DT = nullptr;
-  if (auto *P = getAnalysisIfAvailable<DominatorTreeWrapperPass>())
-    DT = &P->getDomTree();
-
-  if (DT == nullptr) {
-    DeleteDT = std::make_unique<DominatorTree>(F);
-    DT = DeleteDT.get();
-  }
-
-  std::unique_ptr<PostDominatorTree> DeletePDT;
-  PostDominatorTree *PDT = nullptr;
-  if (auto *P = getAnalysisIfAvailable<PostDominatorTreeWrapperPass>())
-    PDT = &P->getPostDomTree();
-
-  if (PDT == nullptr) {
-    DeletePDT = std::make_unique<PostDominatorTree>(F);
-    PDT = DeletePDT.get();
-  }
-
-  std::unique_ptr<LoopInfo> DeleteLI;
-  LoopInfo *LI = nullptr;
-  if (auto *LIWP = getAnalysisIfAvailable<LoopInfoWrapperPass>()) {
-    LI = &LIWP->getLoopInfo();
-  } else {
-    DeleteLI = std::make_unique<LoopInfo>(*DT);
-    LI = DeleteLI.get();
-  }
-
-  NewSegmentStackFunc = Intrinsic::getDeclaration(
-      F.getParent(), Intrinsic::wasm_segment_stack_sp);
-
-  BasicBlock *PrologueBB = nullptr;
-  for (auto Alloca : SInfo.AllocasToInstrument) {
-    const memtag::AllocaInfo &Info = Alloca.second;
-    AllocaInst *AI = Info.AI;
-
-    if (!PrologueBB) {
-      PrologueBB = AI->getParent();
-      continue;
+        AllocaInsts.emplace_back(Alloca);
+      }
     }
-    PrologueBB = DT->findNearestCommonDominator(PrologueBB, AI->getParent());
   }
-  assert(PrologueBB);
 
-  IRBuilder<> IRB(&PrologueBB->front());
-
-  for (auto Alloca : SInfo.AllocasToInstrument) {
-    auto AllocSize =
-        Alloca.second.AI->getAllocationSize(F.getParent()->getDataLayout());
-    if (!AllocSize) {
-      errs() << "AllocSize not known:";
-      Alloca.second.AI->dump();
-      continue;
-    }
-
-    Instruction *NewStackSegmentInst = IRB.CreateCall(
-        NewSegmentStackFunc,
-        {Constant::getIntegerValue(
-            IRB.getInt64Ty(), APInt(64, AllocSize->getFixedValue(), false))});
-    Alloca.second.AI->replaceAllUsesWith(NewStackSegmentInst);
-
-    // TODO: insert free as well
+  for (auto *Alloca : AllocaInsts) {
+    errs() << "Instrumenting alloca: " << *Alloca << "\n";
+      //   Instruction *NewStackSegmentInst = IRB.CreateCall(
+  //       NewSegmentStackFunc,
+  //       {Constant::getIntegerValue(
+  //           IRB.getInt64Ty(), APInt(64, AllocSize->getFixedValue(), false))});
   }
 
   return true;
