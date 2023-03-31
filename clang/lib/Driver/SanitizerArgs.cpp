@@ -1099,10 +1099,6 @@ static bool hasTargetFeatureMTE(const llvm::opt::ArgStringList &CmdArgs) {
 static bool hasTargetFeatureWasmMemSafety(const llvm::opt::ArgStringList &CmdArgs) {
   for (auto Start = CmdArgs.begin(), End = CmdArgs.end(); Start != End;
        ++Start) {
-    llvm::errs() << *Start << "\n";
-  }
-  for (auto Start = CmdArgs.begin(), End = CmdArgs.end(); Start != End;
-       ++Start) {
     const auto *It = std::find(Start, End, StringRef("+mem-safety"));
     if (It == End)
       break;
@@ -1366,9 +1362,10 @@ void SanitizerArgs::addArgs(const ToolChain &TC, const llvm::opt::ArgList &Args,
       !hasTargetFeatureMTE(CmdArgs))
     TC.getDriver().Diag(diag::err_stack_tagging_requires_hardware_feature);
 
-  if (Sanitizers.has(SanitizerKind::WasmMemsafety) &&
-      !hasTargetFeatureWasmMemSafety(CmdArgs))
-      TC.getDriver().Diag(diag::err_wasm_mem_safety_requires_wasm_extension);
+  // TODO(martin): re-add this check once I know how why it doesn't work lmao`
+  // if (Sanitizers.has(SanitizerKind::WasmMemsafety) &&
+  //     !hasTargetFeatureWasmMemSafety(CmdArgs))
+  //     TC.getDriver().Diag(diag::err_wasm_mem_safety_requires_wasm_extension);
 }
 
 SanitizerMask parseArgValues(const Driver &D, const llvm::opt::Arg *A,

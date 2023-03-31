@@ -36,6 +36,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
@@ -45,6 +46,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IntrinsicsWebAssembly.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/InitializePasses.h"
@@ -102,8 +104,8 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     for (auto &I : BB) {
       if (auto *Alloca = dyn_cast<AllocaInst>(&I)) {
         LLVM_DEBUG(dbgs() << "Checking alloca: " << *Alloca << "\n");
-        auto AllocationSize = Alloca->getAllocationSize(DL);
-        if (!AllocationSize) {
+        auto AllocSize = Alloca->getAllocationSize(DL);
+        if (!AllocSize) {
           LLVM_DEBUG(dbgs() << "Allocation size not known, skipping alloca\n");
           continue;
         }
@@ -113,12 +115,23 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     }
   }
 
+  IRBuilder<> IRB(&F.front());
+  IRB.SetInsertPointPastAllocas(&F);
+
+  auto *NewSegmentStackFunc =
+      Intrinsic::getDeclaration(F.getParent(), Intrinsic::wasm_segment_stack_new,
+                                {Type::getInt32Ty(F.getContext())});
+
   for (auto *Alloca : AllocaInsts) {
-    errs() << "Instrumenting alloca: " << *Alloca << "\n";
-      //   Instruction *NewStackSegmentInst = IRB.CreateCall(
-  //       NewSegmentStackFunc,
-  //       {Constant::getIntegerValue(
-  //           IRB.getInt64Ty(), APInt(64, AllocSize->getFixedValue(), false))});
+    auto AllocSize = Alloca->getAllocationSize(DL);
+
+    Instruction *NewStackSegmentInst = IRB.CreateCall(
+        NewSegmentStackFunc,
+        {Alloca,
+         Constant::getIntegerValue(
+             IRB.getInt32Ty(), APInt(32, AllocSize->getFixedValue(), false))});
+
+    Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) { return U.getUser() != NewStackSegmentInst; });
   }
 
   return true;

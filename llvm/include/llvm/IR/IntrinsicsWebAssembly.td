@@ -28,19 +28,13 @@ def int_wasm_memory_grow :
 // mem safety instrinsics
 //===----------------------------------------------------------------------===//
 def int_wasm_segment_new :
-  DefaultAttrsIntrinsic<[llvm_handle_ty], [llvm_anyint_ty], []>;
+  DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_anyint_ty], []>;
 def int_wasm_segment_free :
-  DefaultAttrsIntrinsic<[], [llvm_handle_ty], []>;
+  DefaultAttrsIntrinsic<[], [llvm_ptr_ty, llvm_anyint_ty], []>;
 def int_wasm_segment_stack_new :
-  DefaultAttrsIntrinsic<[llvm_handle_ty], [llvm_handle_ty, llvm_anyint_ty], []>;
+  DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_anyint_ty], []>;
 def int_wasm_segment_stack_free :
-  DefaultAttrsIntrinsic<[], [llvm_handle_ty, llvm_handle_ty, llvm_anyint_ty], []>;
-
-// codegen-only intrinsics for mem safety
-
-// TOOO(martin): check if the intrinsic actually is no-mem and has side effects
-def int_wasm_segment_stack_sp :
-  DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_anyint_ty], [IntrHasSideEffects]>;
+  DefaultAttrsIntrinsic<[], [llvm_ptr_ty, llvm_ptr_ty, llvm_anyint_ty], []>;
 
 //===----------------------------------------------------------------------===//
 // ref.null intrinsics

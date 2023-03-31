@@ -123,8 +123,6 @@ static char getInvokeSig(wasm::ValType VT) {
     return 'F';
   case wasm::ValType::EXTERNREF:
     return 'X';
-  case wasm::ValType::HANDLE:
-    return 'h'; // TODO(martin): use p for pointer instead?
   }
   llvm_unreachable("Unhandled wasm::ValType enum");
 }
@@ -623,8 +621,6 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
   case WebAssembly::ARGUMENT_v4f32_S:
   case WebAssembly::ARGUMENT_v2f64:
   case WebAssembly::ARGUMENT_v2f64_S:
-  case WebAssembly::ARGUMENT_handle:
-  case WebAssembly::ARGUMENT_handle_S:
     // These represent values which are live into the function entry, so there's
     // no instruction to emit.
     break;

@@ -506,8 +506,6 @@ static unsigned getTeeOpcode(const TargetRegisterClass *RC) {
     return WebAssembly::TEE_EXTERNREF;
   if (RC == &WebAssembly::FUNCREFRegClass)
     return WebAssembly::TEE_FUNCREF;
-  if (RC == &WebAssembly::HANDLERegClass)
-    return WebAssembly::TEE_HANDLE;
   llvm_unreachable("Unexpected register class");
 }
 

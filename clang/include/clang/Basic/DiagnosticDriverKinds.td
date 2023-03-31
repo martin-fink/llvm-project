@@ -519,7 +519,7 @@ def err_stack_tagging_requires_hardware_feature : Error<
 
 def err_wasm_mem_safety_requires_wasm_extension : Error<
   "'-fsanitize=wasm-memsafety' requires wasm extension (+mem-safety). Try compiling with"
-  "-march=wasm32-wasi+mem-safety"
+  " -march=wasm32-wasi+mem-safety"
 >;
 
 def err_cmse_pi_are_incompatible : Error<

@@ -34,8 +34,6 @@ std::string toString(ValType type) {
     return "funcref";
   case ValType::EXTERNREF:
     return "externref";
-  case ValType::HANDLE:
-    return "handle";
   }
   llvm_unreachable("Invalid wasm::ValType");
 }

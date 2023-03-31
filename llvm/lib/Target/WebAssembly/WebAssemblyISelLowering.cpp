@@ -47,8 +47,7 @@ using namespace llvm;
 WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     const TargetMachine &TM, const WebAssemblySubtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
-  // TODO(martin): check if this is correct here
-  auto MVTPtr = Subtarget->hasMemSafety() ? MVT::handle : Subtarget->hasAddr64() ? MVT::i64 : MVT::i32;
+  auto MVTPtr = Subtarget->hasAddr64() ? MVT::i64 : MVT::i32;
 
   // Booleans always contain 0 or 1.
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -76,8 +75,6 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     addRegisterClass(MVT::externref, &WebAssembly::EXTERNREFRegClass);
     addRegisterClass(MVT::funcref, &WebAssembly::FUNCREFRegClass);
   }
-  if (Subtarget->hasMemSafety())
-    addRegisterClass(MVT::handle, &WebAssembly::HANDLERegClass);
   // Compute derived properties from the register classes.
   computeRegisterProperties(Subtarget->getRegisterInfo());
 

@@ -288,10 +288,9 @@ enum IIT_Info {
   IIT_V3 = 53,
   IIT_EXTERNREF = 54,
   IIT_FUNCREF = 55,
-  IIT_HANDLE = 56,
-  IIT_ANYPTR_TO_ELT = 57,
-  IIT_I2 = 58,
-  IIT_I4 = 59,
+  IIT_ANYPTR_TO_ELT = 56,
+  IIT_I2 = 56,
+  IIT_I4 = 57,
 };
 
 static void EncodeFixedValueType(MVT::SimpleValueType VT,
@@ -332,8 +331,6 @@ static void EncodeFixedValueType(MVT::SimpleValueType VT,
     return Sig.push_back(IIT_EXTERNREF);
   case MVT::funcref:
     return Sig.push_back(IIT_FUNCREF);
-  case MVT::handle:
-    return Sig.push_back(IIT_HANDLE);
   }
   // clang-format on
 }
