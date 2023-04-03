@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -118,9 +119,9 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
   IRBuilder<> IRB(&F.front());
   IRB.SetInsertPointPastAllocas(&F);
 
-  auto *NewSegmentStackFunc =
-      Intrinsic::getDeclaration(F.getParent(), Intrinsic::wasm_segment_stack_new,
-                                {Type::getInt32Ty(F.getContext())});
+  auto *NewSegmentStackFunc = Intrinsic::getDeclaration(
+      F.getParent(), Intrinsic::wasm_segment_stack_new,
+      {Type::getInt32Ty(F.getContext())});
 
   for (auto *Alloca : AllocaInsts) {
     auto AllocSize = Alloca->getAllocationSize(DL);
@@ -131,7 +132,28 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
          Constant::getIntegerValue(
              IRB.getInt32Ty(), APInt(32, AllocSize->getFixedValue(), false))});
 
-    Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) { return U.getUser() != NewStackSegmentInst; });
+    Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) {
+      return U.getUser() != NewStackSegmentInst;
+    });
+  }
+
+  auto *FreeSegmentFunc =
+      Intrinsic::getDeclaration(F.getParent(), Intrinsic::wasm_segment_free,
+                                {Type::getInt32Ty(F.getContext())});
+
+  for (auto &BB : F) {
+    auto *Terminator = BB.getTerminator();
+
+    for (auto *Alloca : AllocaInsts) {
+      auto AllocSize = Alloca->getAllocationSize(DL);
+
+      auto *FreeSegmentInst = CallInst::Create(
+          FreeSegmentFunc,
+          {Alloca, Constant::getIntegerValue(
+                       Type::getInt32Ty(F.getContext()),
+                       APInt(32, AllocSize->getFixedValue(), false))});
+      FreeSegmentInst->insertBefore(Terminator);
+    }
   }
 
   return true;
@@ -144,7 +166,7 @@ char WebAssemblyStackTagging::ID = 0;
 INITIALIZE_PASS_BEGIN(WebAssemblyStackTagging, DEBUG_TYPE,
                       "WebAssembly Stack Tagging", false, false)
 // INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(StackSafetyGlobalInfoWrapperPass)
+// INITIALIZE_PASS_DEPENDENCY(StackSafetyGlobalInfoWrapperPass)
 INITIALIZE_PASS_END(WebAssemblyStackTagging, DEBUG_TYPE,
                     "WebAssembly Stack Tagging", false, false)
 
