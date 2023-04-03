@@ -120,6 +120,9 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
   auto *NewSegmentStackFunc = Intrinsic::getDeclaration(
       F.getParent(), Intrinsic::wasm_segment_stack_new,
       {Type::getInt32Ty(F.getContext())});
+  auto *FreeSegmentStackFunc = Intrinsic::getDeclaration(
+      F.getParent(), Intrinsic::wasm_segment_stack_free,
+      {Type::getInt32Ty(F.getContext())});
 
   for (auto *Alloca : AllocaInsts) {
     auto *AllocSize = Alloca->getOperand(0);
@@ -146,20 +149,18 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) {
       return U.getUser() != NewStackSegmentInst;
     });
-  }
 
-  auto *FreeSegmentFunc =
-      Intrinsic::getDeclaration(F.getParent(), Intrinsic::wasm_segment_free,
-                                {Type::getInt32Ty(F.getContext())});
+    // Add free in every block that has a terminator
+    // TODO: check if the terminator is also a return from the function
+    for (auto &BB : F) {
+      auto *Terminator = BB.getTerminator();
+      if (!Terminator)
+        continue;
 
-  for (auto &BB : F) {
-    auto *Terminator = BB.getTerminator();
-
-    for (auto *Alloca : AllocaInsts) {
       auto *AllocSize = Alloca->getOperand(0);
 
       auto *FreeSegmentInst =
-          CallInst::Create(FreeSegmentFunc, {Alloca, AllocSize});
+          CallInst::Create(FreeSegmentStackFunc, {NewStackSegmentInst, Alloca, AllocSize});
       FreeSegmentInst->insertBefore(Terminator);
     }
   }
