@@ -140,7 +140,7 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     }
 
     auto *NewStackSegmentInst =
-        CallInst::Create(NewSegmentStackFunc, {Alloca, AllocSize});
+        CallInst::Create(NewSegmentStackFunc, {Alloca, Alloca->getOperand(0)});
     NewStackSegmentInst->insertAfter(Alloca);
 
     Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) {
