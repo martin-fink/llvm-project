@@ -43,6 +43,7 @@
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -52,11 +53,13 @@
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/Alignment.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/MemoryTaggingSupport.h"
+#include <algorithm>
 #include <cassert>
 #include <memory>
 
@@ -105,32 +108,40 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     for (auto &I : BB) {
       if (auto *Alloca = dyn_cast<AllocaInst>(&I)) {
         LLVM_DEBUG(dbgs() << "Checking alloca: " << *Alloca << "\n");
-        auto AllocSize = Alloca->getAllocationSize(DL);
-        if (!AllocSize) {
-          LLVM_DEBUG(dbgs() << "Allocation size not known, skipping alloca\n");
-          continue;
-        }
 
+        // TODO: check which allocas we actually need to protect and which we
+        // don't We cannot use Alloca->isArrayAllocation(), as it returns true
+        // for [i8 x 16] and some more cases
         AllocaInsts.emplace_back(Alloca);
       }
     }
   }
-
-  IRBuilder<> IRB(&F.front());
-  IRB.SetInsertPointPastAllocas(&F);
 
   auto *NewSegmentStackFunc = Intrinsic::getDeclaration(
       F.getParent(), Intrinsic::wasm_segment_stack_new,
       {Type::getInt32Ty(F.getContext())});
 
   for (auto *Alloca : AllocaInsts) {
-    auto AllocSize = Alloca->getAllocationSize(DL);
+    auto *AllocSize = Alloca->getOperand(0);
 
-    Instruction *NewStackSegmentInst = IRB.CreateCall(
-        NewSegmentStackFunc,
-        {Alloca,
-         Constant::getIntegerValue(
-             IRB.getInt32Ty(), APInt(32, AllocSize->getFixedValue(), false))});
+    Alloca->setAlignment(std::max(Alloca->getAlign(), Align(16)));
+    if (auto *Const = dyn_cast<ConstantInt>(AllocSize)) {
+      auto ZextValue = Const->getZExtValue();
+      auto AlignedValue = (ZextValue + 15) & ~0xF;
+      Alloca->setOperand(0, ConstantInt::get(Const->getType(), AlignedValue));
+    } else {
+      auto *AddVal = BinaryOperator::CreateAdd(
+          AllocSize, ConstantInt::get(AllocSize->getType(), 15));
+      AddVal->insertBefore(Alloca);
+      auto *AndVal = BinaryOperator::CreateAnd(
+          AddVal, ConstantInt::get(AllocSize->getType(), 15), "extended");
+      AndVal->insertBefore(Alloca);
+      Alloca->setOperand(0, AndVal);
+    }
+
+    auto *NewStackSegmentInst =
+        CallInst::Create(NewSegmentStackFunc, {Alloca, AllocSize});
+    NewStackSegmentInst->insertAfter(Alloca);
 
     Alloca->replaceUsesWithIf(NewStackSegmentInst, [&](Use &U) {
       return U.getUser() != NewStackSegmentInst;
@@ -145,13 +156,10 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     auto *Terminator = BB.getTerminator();
 
     for (auto *Alloca : AllocaInsts) {
-      auto AllocSize = Alloca->getAllocationSize(DL);
+      auto *AllocSize = Alloca->getOperand(0);
 
-      auto *FreeSegmentInst = CallInst::Create(
-          FreeSegmentFunc,
-          {Alloca, Constant::getIntegerValue(
-                       Type::getInt32Ty(F.getContext()),
-                       APInt(32, AllocSize->getFixedValue(), false))});
+      auto *FreeSegmentInst =
+          CallInst::Create(FreeSegmentFunc, {Alloca, AllocSize});
       FreeSegmentInst->insertBefore(Terminator);
     }
   }
