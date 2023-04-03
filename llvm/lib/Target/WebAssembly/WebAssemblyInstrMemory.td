@@ -194,14 +194,14 @@ defm SEGMENT_NEW_A#B : I<(outs rc:$dst), (ins rc:$size),
                          (outs), (ins rc:$size),
                          [(set rc:$dst,
                             (int_wasm_segment_new rc:$size))],
-                          "segment.new\t$dst, $size", "segment.new\t$size",
+                          "segment.new\t$dst, $size", "segment.new",
                           0xfa00>,
                          Requires<[HasMemSafety]>;
 
 defm SEGMENT_FREE_A#B : I<(outs), (ins rc:$ptr, rc:$size),
                          (outs), (ins rc:$ptr, rc:$size),
                          [(int_wasm_segment_free rc:$ptr, rc:$size)],
-                          "segment.free\t$ptr, $size", "segment.free\t$ptr",
+                          "segment.free\t$ptr, $size", "segment.free",
                           0xfa01>,
                          Requires<[HasMemSafety]>;
 
@@ -209,14 +209,14 @@ defm SEGMENT_STACK_NEW_A#B : I<(outs rc:$dst), (ins rc:$sp, rc:$size),
                          (outs), (ins rc:$sp, rc:$size),
                          [(set rc:$dst,
                             (int_wasm_segment_stack_new rc:$sp, rc:$size))],
-                          "segment.stack_new\t$dst, $sp, $size", "segment.stack_new\t$sp",
+                          "segment.stack_new\t$dst, $sp, $size", "segment.stack_new",
                           0xfa02>,
                          Requires<[]>; // HasMemSafety
 
 defm SEGMENT_STACK_FREE_A#B : I<(outs), (ins rc:$ptr, rc:$sp, rc:$size),
                          (outs), (ins rc:$ptr, rc:$sp, rc:$size),
                          [(int_wasm_segment_stack_free rc:$ptr, rc:$sp, rc:$size)],
-                          "segment.stack_free\t$ptr, $sp, $size", "segment.stack_free\t$ptr",
+                          "segment.stack_free\t$ptr, $sp, $size", "segment.stack_free",
                           0xfa03>,
                          Requires<[HasMemSafety]>;
 }
