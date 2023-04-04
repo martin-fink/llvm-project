@@ -117,6 +117,7 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     }
   }
 
+  DominatorTree DT(F);
   auto *NewSegmentStackFunc = Intrinsic::getDeclaration(
       F.getParent(), Intrinsic::wasm_segment_stack_new,
       {Type::getInt32Ty(F.getContext())});
@@ -151,9 +152,18 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     });
 
     // Add free in every block that has a terminator
-    // TODO: potential to optimize for code size -- create a unified return block, with a phi node that collects
-    //       the return value; then free the stack blocks and then return the phi value
+    // TODO: potential to optimize for code size -- create a unified return
+    // block, with a phi node that collects the return value; then free the
+    // stack blocks and then return the phi value
+    // TODO: this does not work properly with variable length arrays at the
+    // moment: segment.free_stack is not inserted.
     for (auto &BB : F) {
+      // Check if the current block is dominated by the alloca -- if not, skip
+      // this block
+      if (!DT.dominates(Alloca, &BB)) {
+        continue;
+      }
+
       auto *Terminator = BB.getTerminator();
 
       while (isa_and_nonnull<UnreachableInst>(Terminator)) {
@@ -163,7 +173,7 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
       if (!Terminator)
         continue;
 
-      auto IsTailCall = [](Instruction *I){
+      auto IsTailCall = [](Instruction *I) {
         auto *Call = dyn_cast<CallInst>(I);
         return Call && Call->isTailCall();
       };
@@ -173,8 +183,8 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
 
       auto *AllocSize = Alloca->getOperand(0);
 
-      auto *FreeSegmentInst =
-          CallInst::Create(FreeSegmentStackFunc, {NewStackSegmentInst, Alloca, AllocSize});
+      auto *FreeSegmentInst = CallInst::Create(
+          FreeSegmentStackFunc, {NewStackSegmentInst, Alloca, AllocSize});
       FreeSegmentInst->insertBefore(Terminator);
     }
   }
