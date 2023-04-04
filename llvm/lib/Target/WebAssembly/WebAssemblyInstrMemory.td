@@ -172,6 +172,54 @@ defm : StorePat<i64, truncstorei8, "STORE8_I64">;
 defm : StorePat<i64, truncstorei16, "STORE16_I64">;
 defm : StorePat<i64, truncstorei32, "STORE32_I64">;
 
+let UseNamedOperandTable = 1 in {
+
+defm SEGMENT_NEW_A32 : I<(outs I32:$dst),
+                        (ins I32:$size),
+                        (outs), (ins I32:$size),
+                        [],
+                        "segment.new\t$dst, $size", "segment.new",
+                        0xfa00, false>,
+                        Requires<[]>; // HasMemSafety
+
+defm SEGMENT_FREE_A32 : I<(outs),
+                        (ins P2Align:$p2align, offset32_op:$off, I32:$addr, I32:$size),
+                        (outs),
+                        (ins P2Align:$p2align, offset32_op:$off),
+                        [],
+                        "segment.free\t${off}(${addr})${p2align}, $size", "segment.free\t${off}${p2align}",
+                        0xfa01, false>,
+                        Requires<[]>; // HasMemSafety
+
+defm SEGMENT_STACK_NEW_A32 : I<(outs I32:$dst),
+                               (ins P2Align:$p2align, offset32_op:$off, I32:$sp, I32:$size),
+                               (outs),
+                               (ins P2Align:$p2align, offset32_op:$off),
+                               [],
+                               "segment.stack_new\t$dst, ${off}(${sp})${p2align}, $size", "segment.stack_new\t${off}${p2align}",
+                               0xfa02, false>,
+                        Requires<[]>; // HasMemSafety
+
+defm SEGMENT_STACK_FREE_A32 : I<(outs),
+                                (ins P2Align:$p2align, offset32_op:$off, I32:$addr, I32:$sp, I32:$size),
+                                (outs),
+                                (ins P2Align:$p2align, offset32_op:$off),
+                                [],
+                                "segment.stack_free\t${off}(${addr})${p2align}, $sp, $size", "segment.stack_free\t${off}${p2align}",
+                                0xfa03, false>,
+                        Requires<[]>; // HasMemSafety
+}
+
+def : Pat<(int_wasm_segment_new I32:$size),
+          (!cast<NI>(SEGMENT_NEW_A32) I32:$size)>;
+def : Pat<(int_wasm_segment_free (AddrOps32 offset32_op:$offset, I32:$addr), I32:$size),
+          (!cast<NI>(SEGMENT_FREE_A32) 0, offset32_op:$offset, I32:$addr, I32:$size)>;
+def : Pat<(int_wasm_segment_stack_new (AddrOps32 offset32_op:$offset, I32:$addr), I32:$size),
+          (!cast<NI>(SEGMENT_STACK_NEW_A32) 0, offset32_op:$offset, I32:$addr, I32:$size)>;
+def : Pat<(int_wasm_segment_stack_free (AddrOps32 offset32_op:$offset, I32:$addr), I32:$sp, I32:$size),
+          (!cast<NI>(SEGMENT_STACK_FREE_A32) 0, offset32_op:$offset, I32:$addr, I32:$sp, I32:$size)>;
+
+
 multiclass MemoryOps<WebAssemblyRegClass rc, string B> {
 // Current memory size.
 defm MEMORY_SIZE_A#B : I<(outs rc:$dst), (ins i32imm:$flags),
@@ -189,36 +237,6 @@ defm MEMORY_GROW_A#B : I<(outs rc:$dst), (ins i32imm:$flags, rc:$delta),
                              rc:$delta))],
                          "memory.grow\t$dst, $flags, $delta",
                          "memory.grow\t$flags", 0x40>;
-
-defm SEGMENT_NEW_A#B : I<(outs rc:$dst), (ins rc:$size),
-                         (outs), (ins rc:$size),
-                         [(set rc:$dst,
-                            (int_wasm_segment_new rc:$size))],
-                          "segment.new\t$dst, $size", "segment.new",
-                          0xfa00>,
-                         Requires<[]>; // HasMemSafety
-
-defm SEGMENT_FREE_A#B : I<(outs), (ins rc:$ptr, rc:$size),
-                         (outs), (ins rc:$ptr, rc:$size),
-                         [(int_wasm_segment_free rc:$ptr, rc:$size)],
-                          "segment.free\t$ptr, $size", "segment.free",
-                          0xfa01>,
-                         Requires<[]>; // HasMemSafety
-
-defm SEGMENT_STACK_NEW_A#B : I<(outs rc:$dst), (ins rc:$sp, rc:$size),
-                         (outs), (ins rc:$sp, rc:$size),
-                         [(set rc:$dst,
-                            (int_wasm_segment_stack_new rc:$sp, rc:$size))],
-                          "segment.stack_new\t$dst, $sp, $size", "segment.stack_new",
-                          0xfa02>,
-                         Requires<[]>; // HasMemSafety
-
-defm SEGMENT_STACK_FREE_A#B : I<(outs), (ins rc:$ptr, rc:$sp, rc:$size),
-                         (outs), (ins rc:$ptr, rc:$sp, rc:$size),
-                         [(int_wasm_segment_stack_free rc:$ptr, rc:$sp, rc:$size)],
-                          "segment.stack_free\t$ptr, $sp, $size", "segment.stack_free",
-                          0xfa03>,
-                         Requires<[]>; // HasMemSafety
 }
 
 defm : MemoryOps<I32, "32">;

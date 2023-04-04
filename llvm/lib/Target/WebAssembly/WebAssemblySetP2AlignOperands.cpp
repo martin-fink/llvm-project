@@ -57,6 +57,11 @@ FunctionPass *llvm::createWebAssemblySetP2AlignOperands() {
 static void rewriteP2Align(MachineInstr &MI, unsigned OperandNo) {
   assert(MI.getOperand(OperandNo).getImm() == 0 &&
          "ISel should set p2align operands to 0");
+  // TODO: For the segment.* instructions, the mem operand is not set, since we select via a pattern
+  // in the .td files. Fix that.
+  if (!MI.hasOneMemOperand()) {
+    return;
+  }
   assert(MI.hasOneMemOperand() &&
          "Load and store instructions have exactly one mem operand");
   assert((*MI.memoperands_begin())->getSize() ==
