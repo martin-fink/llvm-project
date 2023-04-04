@@ -151,10 +151,24 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
     });
 
     // Add free in every block that has a terminator
-    // TODO: check if the terminator is also a return from the function
+    // TODO: potential to optimize for code size -- create a unified return block, with a phi node that collects
+    //       the return value; then free the stack blocks and then return the phi value
     for (auto &BB : F) {
       auto *Terminator = BB.getTerminator();
+
+      while (isa_and_nonnull<UnreachableInst>(Terminator)) {
+        Terminator = Terminator->getPrevNonDebugInstruction();
+      }
+
       if (!Terminator)
+        continue;
+
+      auto IsTailCall = [](Instruction *I){
+        auto *Call = dyn_cast<CallInst>(I);
+        return Call && Call->isTailCall();
+      };
+
+      if (!isa<ReturnInst>(Terminator) && !IsTailCall(Terminator))
         continue;
 
       auto *AllocSize = Alloca->getOperand(0);
@@ -164,6 +178,8 @@ bool WebAssemblyStackTagging::runOnFunction(Function &F) {
       FreeSegmentInst->insertBefore(Terminator);
     }
   }
+
+  F.dump();
 
   return true;
 }
