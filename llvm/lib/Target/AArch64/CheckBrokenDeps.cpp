@@ -47,6 +47,7 @@
 #include <optional>
 #include <ostream>
 #include <queue>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -374,7 +375,7 @@ class RegisterValueMapping {
 public:
   RegisterValueMapping(const MachineFunction *MF)
       : RegistersMap(), WorkingSet() {
-    if (MF->getFunction().getNumOperands() > AArch64ArgRegs.size()) {
+    if (MF->getFunction().arg_size() > AArch64ArgRegs.size()) {
       llvm_unreachable(
           "Unable to handle functions that pass arguments on the stack");
     }
@@ -1727,7 +1728,9 @@ void BFSCtx::handleDependentFunctionArgs(MachineInstr *CallInstr,
 
   Function &CalledF = CalledMF.value()->getFunction();
   if (CalledF.arg_size() > AArch64ArgRegs.size()) {
-    errs() << "Unable to handle function with arguments passed on stack\n";
+    errs() << "handleDependentFunctionArgs: Unable to handle function with "
+              "arguments passed on the stack: "
+           << CalledF.getName() << "\n";
     return;
   }
 
@@ -1790,8 +1793,8 @@ InterprocBFSRes BFSCtx::runInterprocBFS(MachineBasicBlock *FirstMBB,
 }
 
 void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
-  MFDEBUG(errs() << "\nBlock " << MBB->getParent()->getName() << "::bb."
-                 << MBB->getNumber() << "." << MBB->getName() << "\n";);
+  // MFDEBUG(errs() << "\nBlock " << MBB->getParent()->getName() << "::bb."
+  //                << MBB->getNumber() << "." << MBB->getName() << "\n";);
 
   this->MBB = MBB;
   RegisterValueMap.enterBlock(MBB);
@@ -1806,7 +1809,7 @@ void BFSCtx::visitBasicBlock(MachineBasicBlock *MBB) {
 }
 
 void BFSCtx::visitInstruction(MachineInstr *MI) {
-  if (MBB->getParent()->getName() == "rw_addr_dep_end_beg_and_end_in_calls ") {
+  if (MBB->getParent()->getName() == "taprio_dequeue") {
     auto &DebugLoc = MI->getDebugLoc();
     if (!DebugLoc) {
       MFDEBUG(errs() << "unknown:0:0: ";);
@@ -1894,9 +1897,13 @@ void BFSCtx::handleCallInst(MachineInstr *MI) {
 
   auto *VAdd = MI;
 
+  std::set<string> HandledRetADBs{};
   // Handle returned addr deps.
   for (auto &IRetAD : RADBsFromCall) {
     auto ID = IRetAD->ADB.getID();
+    if (!HandledRetADBs.insert(ID).second) {
+      continue;
+    }
 
     if (auto *OvwrADB = dyn_cast<OverwrittenADB>(IRetAD.get())) {
       assert(ADBs.find(ID) != ADBs.end() &&
@@ -2282,6 +2289,7 @@ void BFSCtx::handleDepAnnotations(MachineInstr *MI,
     }
 
     // MFDEBUG(errs() << "- " << CurrentDepHalfStr.str() << "\n";);
+    // MFDEBUG(errs() << "- ParsedID: \n" << ParsedID << "\n\n";);
 
     if (ParsedDepHalfTypeStr.find("begin") != string::npos) {
       if (ADBs.find(ParsedID) != ADBs.end()) {
@@ -2517,7 +2525,14 @@ private:
 char LKMMCheckDepsBackend::ID = 0;
 
 bool LKMMCheckDepsBackend::runOnMachineFunction(MachineFunction &MF) {
-  if (!MFDEBUG_ENABLED || MF.getName().str() == "rw_addr_dep_end_beg_and_end_in_calls") {
+  if (MF.getFunction().arg_size() > AArch64ArgRegs.size()) {
+    errs() << "Unable to handle function that passes arguments on the stack: "
+           << MF.getName() << "\n";
+    return false;
+  }
+
+  if (!MFDEBUG_ENABLED ||
+      MF.getName().str() == "taprio_dequeue") {
     MFDEBUG(dbgs() << "Checking deps for " << MF.getName() << "\n";);
     MFDEBUG(MF.dump(););
     MFDEBUG(MF.getFunction().dump(););
