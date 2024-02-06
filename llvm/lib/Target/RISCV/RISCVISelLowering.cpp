@@ -12582,6 +12582,91 @@ static bool CC_RISCV_GHC(unsigned ValNo, MVT ValVT, MVT LocVT,
   return true;
 }
 
+static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
+                              unsigned ValNo, MVT ValVT, MVT LocVT,
+                              CCValAssign::LocInfo LocInfo,
+                              ISD::ArgFlagsTy ArgFlags, CCState &State,
+                              bool IsFixed, bool IsRet, Type *OrigTy,
+                              const RISCVTargetLowering &TLI,
+                              std::optional<unsigned> FirstMaskArgument) {
+  // CPU state + 16 * x86 gpr + PC + FS + GS
+  static const MCPhysReg GPRList[] = {
+      RISCV::X5,
+      RISCV::X6,
+      RISCV::X7,
+      RISCV::X9,
+      RISCV::X10,
+      RISCV::X11,
+      RISCV::X12,
+      RISCV::X13,
+      RISCV::X14,
+      RISCV::X15,
+      RISCV::X16,
+      RISCV::X17,
+      RISCV::X18,
+      RISCV::X19,
+      RISCV::X20,
+      RISCV::X21,
+      RISCV::X28,
+      RISCV::X29,
+      RISCV::X30,
+      RISCV::X31,
+  };
+
+  if (LocVT == MVT::i32 || LocVT == MVT::i64) {
+    if (unsigned Reg = State.AllocateReg(GPRList)) {
+      State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
+      return false;
+    }
+  }
+
+  //const RISCVSubtarget &Subtarget = TLI.getSubtarget();
+
+  if (LocVT == MVT::i32) {
+    unsigned Offset4 = State.AllocateStack(4, Align(4));
+    State.addLoc(CCValAssign::getMem(ValNo, ValVT, Offset4, LocVT, LocInfo));
+    return false;
+  }
+
+  if (LocVT == MVT::i64) {
+    unsigned Offset5 = State.AllocateStack(8, Align(8));
+    State.addLoc(CCValAssign::getMem(ValNo, ValVT, Offset5, LocVT, LocInfo));
+    return false;
+  }
+
+  if (LocVT.isVector()) {
+    if (unsigned Reg =
+            allocateRVVReg(ValVT, ValNo, FirstMaskArgument, State, TLI)) {
+      // Fixed-length vectors are located in the corresponding scalable-vector
+      // container types.
+      if (ValVT.isFixedLengthVector())
+        LocVT = TLI.getContainerForFixedLengthVector(LocVT);
+      State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
+    } else {
+      // Try and pass the address via a "fast" GPR.
+      if (unsigned GPRReg = State.AllocateReg(GPRList)) {
+        LocInfo = CCValAssign::Indirect;
+        LocVT = TLI.getSubtarget().getXLenVT();
+        State.addLoc(CCValAssign::getReg(ValNo, ValVT, GPRReg, LocVT, LocInfo));
+      } else if (ValVT.isFixedLengthVector()) {
+        auto StackAlign =
+            MaybeAlign(ValVT.getScalarSizeInBits() / 8).valueOrOne();
+        unsigned StackOffset =
+            State.AllocateStack(ValVT.getStoreSize(), StackAlign);
+        State.addLoc(
+            CCValAssign::getMem(ValNo, ValVT, StackOffset, LocVT, LocInfo));
+      } else {
+        // Can't pass scalable vectors on the stack.
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  return true; // CC didn't match.
+}
+
 // Transform physical registers into virtual registers.
 SDValue RISCVTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
@@ -12595,6 +12680,7 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
     report_fatal_error("Unsupported calling convention");
   case CallingConv::C:
   case CallingConv::Fast:
+  case CallingConv::Arancini:
     break;
   case CallingConv::GHC:
     if (!MF.getSubtarget().getFeatureBits()[RISCV::FeatureStdExtF] ||
@@ -12631,8 +12717,11 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
     CCInfo.AnalyzeFormalArguments(Ins, CC_RISCV_GHC);
   else
     analyzeInputArgs(MF, CCInfo, Ins, /*IsRet=*/false,
-                     CallConv == CallingConv::Fast ? CC_RISCV_FastCC
-                                                   : CC_RISCV);
+                     CallConv == CallingConv::Arancini
+                         ? CC_RISCV_Arancini
+                         : (CallConv == CallingConv::Fast
+                                ? CC_RISCV_FastCC
+                                : CC_RISCV));
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
@@ -12847,8 +12936,11 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     ArgCCInfo.AnalyzeCallOperands(Outs, CC_RISCV_GHC);
   else
     analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false, &CLI,
-                      CallConv == CallingConv::Fast ? CC_RISCV_FastCC
-                                                    : CC_RISCV);
+                      CallConv == CallingConv::Arancini
+                          ? CC_RISCV_Arancini
+                          : (CallConv == CallingConv::Fast
+                                 ? CC_RISCV_FastCC
+                                 : CC_RISCV));
 
   // Check if it's really possible to do a tail call.
   if (IsTailCall)
@@ -13090,7 +13182,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   // Assign locations to each value returned by this call.
   SmallVector<CCValAssign, 16> RVLocs;
   CCState RetCCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
-  analyzeInputArgs(MF, RetCCInfo, Ins, /*IsRet=*/true, CC_RISCV);
+  analyzeInputArgs(MF, RetCCInfo, Ins, /*IsRet=*/true,  CallConv == CallingConv::Arancini ? CC_RISCV_Arancini : CC_RISCV);
 
   // Copy all of the result registers out of their specified physreg.
   for (auto &VA : RVLocs) {
@@ -13133,7 +13225,8 @@ bool RISCVTargetLowering::CanLowerReturn(
     MVT VT = Outs[i].VT;
     ISD::ArgFlagsTy ArgFlags = Outs[i].Flags;
     RISCVABI::ABI ABI = MF.getSubtarget<RISCVSubtarget>().getTargetABI();
-    if (CC_RISCV(MF.getDataLayout(), ABI, i, VT, VT, CCValAssign::Full,
+    RISCVCCAssignFn *Fn = CallConv == CallingConv::Arancini ? CC_RISCV_Arancini : CC_RISCV;
+    if (Fn(MF.getDataLayout(), ABI, i, VT, VT, CCValAssign::Full,
                  ArgFlags, CCInfo, /*IsFixed=*/true, /*IsRet=*/true, nullptr,
                  *this, FirstMaskArgument))
       return false;
@@ -13158,7 +13251,7 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                  *DAG.getContext());
 
   analyzeOutputArgs(DAG.getMachineFunction(), CCInfo, Outs, /*IsRet=*/true,
-                    nullptr, CC_RISCV);
+                    nullptr, CallConv == CallingConv::Arancini ? CC_RISCV_Arancini : CC_RISCV);
 
   if (CallConv == CallingConv::GHC && !RVLocs.empty())
     report_fatal_error("GHC functions return void only");

@@ -6237,13 +6237,18 @@ CCAssignFn *AArch64TargetLowering::CCAssignFnForCall(CallingConv::ID CC,
    case CallingConv::AArch64_SME_ABI_Support_Routines_PreserveMost_From_X0:
    case CallingConv::AArch64_SME_ABI_Support_Routines_PreserveMost_From_X2:
      return CC_AArch64_AAPCS;
+   case CallingConv::Arancini:
+     return CC_AArch64_Arancini;
   }
 }
 
 CCAssignFn *
 AArch64TargetLowering::CCAssignFnForReturn(CallingConv::ID CC) const {
-  return CC == CallingConv::WebKit_JS ? RetCC_AArch64_WebKit_JS
-                                      : RetCC_AArch64_AAPCS;
+  if (CC == CallingConv::WebKit_JS)
+     return RetCC_AArch64_WebKit_JS;
+  if (CC == CallingConv::Arancini)
+     return RetCC_AArch64_Arancini;
+  return RetCC_AArch64_AAPCS;
 }
 
 
