@@ -12634,6 +12634,46 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
     return false;
   }
 
+  static const MCPhysReg VecRegList[] = {
+    RISCV::V0,
+    RISCV::V1,
+    RISCV::V2,
+    RISCV::V3,
+    RISCV::V4,
+    RISCV::V5,
+    RISCV::V7,
+    RISCV::V8,
+    RISCV::V9,
+    RISCV::V10,
+    RISCV::V11,
+    RISCV::V12,
+    RISCV::V13,
+    RISCV::V14,
+    RISCV::V15,
+    RISCV::V17,
+    RISCV::V18,
+    RISCV::V19,
+    RISCV::V20,
+    RISCV::V21,
+    RISCV::V22,
+    RISCV::V23,
+    RISCV::V24,
+    RISCV::V25,
+    RISCV::V27,
+    RISCV::V28,
+    RISCV::V29,
+    RISCV::V30,
+    RISCV::V31,
+  };
+
+  if (LocVT == MVT::i128 || LocVT.isVector()) {
+    if (unsigned Reg = State.AllocateReg(VecRegList)) {
+      State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
+      return false;
+    }
+  }
+
+
   if (LocVT.isVector()) {
     if (unsigned Reg =
             allocateRVVReg(ValVT, ValNo, FirstMaskArgument, State, TLI)) {
