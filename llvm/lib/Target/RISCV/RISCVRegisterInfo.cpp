@@ -56,7 +56,7 @@ RISCVRegisterInfo::RISCVRegisterInfo(unsigned HwMode)
 const MCPhysReg *
 RISCVRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   auto &Subtarget = MF->getSubtarget<RISCVSubtarget>();
-  if (MF->getFunction().getCallingConv() == CallingConv::GHC)
+  if (MF->getFunction().getCallingConv() == CallingConv::GHC || MF->getFunction().getCallingConv() == CallingConv::Arancini)
     return CSR_NoRegs_SaveList;
   if (MF->getFunction().hasFnAttribute("interrupt")) {
     if (Subtarget.hasStdExtD())
@@ -629,7 +629,7 @@ RISCVRegisterInfo::getCallPreservedMask(const MachineFunction & MF,
                                         CallingConv::ID CC) const {
   auto &Subtarget = MF.getSubtarget<RISCVSubtarget>();
 
-  if (CC == CallingConv::GHC)
+  if (CC == CallingConv::GHC || CC == CallingConv::Arancini)
     return CSR_NoRegs_RegMask;
   switch (Subtarget.getTargetABI()) {
   default:
