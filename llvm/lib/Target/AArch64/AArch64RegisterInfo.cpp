@@ -71,7 +71,8 @@ const MCPhysReg *
 AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   assert(MF && "Invalid MachineFunction pointer.");
 
-  if (MF->getFunction().getCallingConv() == CallingConv::GHC)
+  if (MF->getFunction().getCallingConv() == CallingConv::GHC ||
+      MF->getFunction().getCallingConv() == CallingConv::Arancini)
     // GHC set of callee saved regs is empty as all those regs are
     // used for passing STG regs around
     return CSR_AArch64_NoRegs_SaveList;
@@ -244,7 +245,7 @@ const uint32_t *
 AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                           CallingConv::ID CC) const {
   bool SCS = MF.getFunction().hasFnAttribute(Attribute::ShadowCallStack);
-  if (CC == CallingConv::GHC)
+  if (CC == CallingConv::GHC || CC == CallingConv::Arancini)
     // This is academic because all GHC calls are (supposed to be) tail calls
     return SCS ? CSR_AArch64_NoRegs_SCS_RegMask : CSR_AArch64_NoRegs_RegMask;
   if (CC == CallingConv::AnyReg)
@@ -345,6 +346,7 @@ AArch64RegisterInfo::getThisReturnPreservedMask(const MachineFunction &MF,
   // In case that the calling convention does not use the same register for
   // both, the function should return NULL (does not currently apply)
   assert(CC != CallingConv::GHC && "should not be GHC calling convention.");
+  assert(CC != CallingConv::Arancini && "should not be Arancini calling convention.");
   if (MF.getSubtarget<AArch64Subtarget>().isTargetDarwin())
     return CSR_Darwin_AArch64_AAPCS_ThisReturn_RegMask;
   return CSR_AArch64_AAPCS_ThisReturn_RegMask;
@@ -546,6 +548,8 @@ bool AArch64RegisterInfo::isArgumentRegister(const MachineFunction &MF,
     return HasReg(CC_AArch64_WebKit_JS_ArgRegs, Reg);
   case CallingConv::GHC:
     return HasReg(CC_AArch64_GHC_ArgRegs, Reg);
+  case CallingConv::Arancini:
+    return HasReg(CC_AArch64_Arancini_ArgRegs, Reg);
   case CallingConv::C:
   case CallingConv::Fast:
   case CallingConv::PreserveMost:

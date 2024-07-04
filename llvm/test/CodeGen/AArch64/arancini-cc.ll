@@ -4,18 +4,11 @@
 define arancini i64 @func0(ptr %0) {
 ; CHECK-LABEL: func0:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    stp x29, x30, [sp, #-16]! // 16-byte Folded Spill
-; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    mov x29, sp
-; CHECK-NEXT:    .cfi_def_cfa w29, 16
-; CHECK-NEXT:    .cfi_offset w30, -8
-; CHECK-NEXT:    .cfi_offset w29, -16
 ; CHECK-NEXT:    mov w1, #1
 ; CHECK-NEXT:    mov w2, #2
 ; CHECK-NEXT:    mov w3, #3
 ; CHECK-NEXT:    bl func1
 ; CHECK-NEXT:    mov x1, x3
-; CHECK-NEXT:    ldp x29, x30, [sp], #16 // 16-byte Folded Reload
 ; CHECK-NEXT:    ret
   %2 = call arancini { i64, i64, i64 } @func1(ptr %0, i64 1, i64 2, i64 3)
   %3 = extractvalue { i64, i64, i64 } %2, 2
@@ -25,14 +18,7 @@ define arancini i64 @func0(ptr %0) {
 define arancini { i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func1:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    stp x29, x30, [sp, #-16]! // 16-byte Folded Spill
-; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    mov x29, sp
-; CHECK-NEXT:    .cfi_def_cfa w29, 16
-; CHECK-NEXT:    .cfi_offset w30, -8
-; CHECK-NEXT:    .cfi_offset w29, -16
 ; CHECK-NEXT:    bl func2
-; CHECK-NEXT:    ldp x29, x30, [sp], #16 // 16-byte Folded Reload
 ; CHECK-NEXT:    ret
   %5 = call arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3)
   ret { i64, i64, i64 } %5
@@ -59,17 +45,8 @@ define arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
 define arancini { i64, i64, i64 } @func3(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func3:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    sub sp, sp, #32
-; CHECK-NEXT:    .cfi_def_cfa_offset 32
-; CHECK-NEXT:    stp x29, x30, [sp, #16] // 16-byte Folded Spill
-; CHECK-NEXT:    add x29, sp, #16
-; CHECK-NEXT:    .cfi_def_cfa w29, 16
-; CHECK-NEXT:    .cfi_offset w30, -8
-; CHECK-NEXT:    .cfi_offset w29, -16
 ; CHECK-NEXT:    add x3, sp, #8
 ; CHECK-NEXT:    bl func2
-; CHECK-NEXT:    ldp x29, x30, [sp, #16] // 16-byte Folded Reload
-; CHECK-NEXT:    add sp, sp, #32
 ; CHECK-NEXT:    ret
 entry:
     ; Allocate an i64 slot on the stack
@@ -83,4 +60,80 @@ entry:
 
     ; Return the values from func2
     ret { i64, i64, i64 } %result
+}
+
+define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
+; CHECK-LABEL: funcx2:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    add x2, x2, #1
+; CHECK-NEXT:    add x1, x1, #1
+; CHECK-NEXT:    add x3, x3, #1
+; CHECK-NEXT:    add x4, x4, #1
+; CHECK-NEXT:    add x5, x5, #1
+; CHECK-NEXT:    add x6, x6, #1
+; CHECK-NEXT:    add x7, x7, #1
+; CHECK-NEXT:    add x8, x8, #1
+; CHECK-NEXT:    add x9, x9, #1
+; CHECK-NEXT:    add x10, x10, #1
+; CHECK-NEXT:    add x11, x11, #1
+; CHECK-NEXT:    add x12, x12, #1
+; CHECK-NEXT:    add x13, x13, #1
+; CHECK-NEXT:    add x14, x14, #1
+; CHECK-NEXT:    add x15, x15, #1
+; CHECK-NEXT:    add x16, x16, #1
+; CHECK-NEXT:    add x17, x17, #1
+; CHECK-NEXT:    add x18, x18, #1
+; CHECK-NEXT:    add x19, x19, #1
+; CHECK-NEXT:    ret
+  %21 = add i64 %1, 1
+  %22 = add i64 %2, 1
+  %23 = add i64 %3, 1
+  %24 = add i64 %4, 1
+  %25 = add i64 %5, 1
+  %26 = add i64 %6, 1
+  %27 = add i64 %7, 1
+  %28 = add i64 %8, 1
+  %29 = add i64 %9, 1
+  %30 = add i64 %10, 1
+  %31 = add i64 %11, 1
+  %32 = add i64 %12, 1
+  %33 = add i64 %13, 1
+  %34 = add i64 %14, 1
+  %35 = add i64 %15, 1
+  %36 = add i64 %16, 1
+  %37 = add i64 %17, 1
+  %38 = add i64 %18, 1
+  %39 = add i64 %19, 1
+
+  %ret_val = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } undef, i64 %21, 0
+  %ret_val2 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val, i64 %22, 1
+  %ret_val3 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val2, i64 %23, 2
+  %ret_val4 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val3, i64 %24, 3
+  %ret_val5 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val4, i64 %25, 4
+  %ret_val6 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val5, i64 %26, 5
+  %ret_val7 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val6, i64 %27, 6
+  %ret_val8 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val7, i64 %28, 7
+  %ret_val9 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val8, i64 %29, 8
+  %ret_val10 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val9, i64 %30, 9
+  %ret_val11 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val10, i64 %31, 10
+  %ret_val12 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val11, i64 %32, 11
+  %ret_val13 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val12, i64 %33, 12
+  %ret_val14 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val13, i64 %34, 13
+  %ret_val15 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val14, i64 %35, 14
+  %ret_val16 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val15, i64 %36, 15
+  %ret_val17 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val16, i64 %37, 16
+  %ret_val18 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val17, i64 %38, 17
+  %ret_val19 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val18, i64 %39, 18
+
+  ret { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val19
+}
+
+define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx3(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
+; CHECK-LABEL: funcx3:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    bl funcx2
+; CHECK-NEXT:    ret
+  %21 = call arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19)
+
+  ret { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %21
 }
