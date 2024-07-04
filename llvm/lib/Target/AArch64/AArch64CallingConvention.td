@@ -410,9 +410,9 @@ def RetCC_AArch64_Arancini : CallingConv<[
   CCIfType<[iPTR], CCBitConvertToType<i64>>,
 
   CCIfType<[i1, i8, i16, i32], CCPromoteToType<i64>>,
-  // PC + 16 * GPR + FS + GS
 
-  CCIfType<[i64], CCAssignToReg<[X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
+  // skip CPU state, PC + 16 * GPR + FS + GS
+  CCIfType<[i64], CCAssignToReg<[X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
 
   //CCIfType<[i64], CCAssignToReg<[X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
 //  CCIfType<[v1i64, v2i32, v4i16, v8i8, v1f64, v2f32, v4f16, v4bf16],

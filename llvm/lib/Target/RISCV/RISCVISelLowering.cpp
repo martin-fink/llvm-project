@@ -12612,9 +12612,32 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
       RISCV::X30,
       RISCV::X31,
   };
+  static const MCPhysReg GPRRetList[] = {
+      // skip the cpu state ptr
+      RISCV::X6,
+      RISCV::X7,
+      RISCV::X9,
+      RISCV::X10,
+      RISCV::X11,
+      RISCV::X12,
+      RISCV::X13,
+      RISCV::X14,
+      RISCV::X15,
+      RISCV::X16,
+      RISCV::X17,
+      RISCV::X18,
+      RISCV::X19,
+      RISCV::X20,
+      RISCV::X21,
+      RISCV::X28,
+      RISCV::X29,
+      RISCV::X30,
+      RISCV::X31,
+  };
 
   if (LocVT == MVT::i32 || LocVT == MVT::i64) {
-    if (unsigned Reg = State.AllocateReg(GPRList)) {
+    unsigned Reg = IsRet ? State.AllocateReg(GPRRetList) : State.AllocateReg(GPRList);
+    if (Reg) {
       State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
       return false;
     }

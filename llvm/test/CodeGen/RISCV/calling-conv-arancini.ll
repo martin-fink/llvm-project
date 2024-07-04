@@ -15,17 +15,17 @@ define arancini i64 @func0(ptr %0) {
 ; CHECK-NEXT:    li t2, 2
 ; CHECK-NEXT:    li s1, 3
 ; CHECK-NEXT:    call func1@plt
-; CHECK-NEXT:    mv t0, t2
+; CHECK-NEXT:    mv t1, t2
 ; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
 ; CHECK-NEXT:    ld s1, 0(sp) # 8-byte Folded Reload
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
-  %2 = call arancini { ptr, i64, i64, i64 } @func1(ptr %0, i64 1, i64 2, i64 3)
-  %3 = extractvalue { ptr, i64, i64, i64 } %2, 2
+  %2 = call arancini { i64, i64, i64 } @func1(ptr %0, i64 1, i64 2, i64 3)
+  %3 = extractvalue { i64, i64, i64 } %2, 1
   ret i64 %3
 }
 
-define arancini { ptr, i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
+define arancini { i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func1:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addi sp, sp, -16
@@ -39,11 +39,11 @@ define arancini { ptr, i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-NEXT:    ld s1, 0(sp) # 8-byte Folded Reload
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
-  %5 = call arancini { ptr, i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3)
-  ret { ptr, i64, i64, i64 } %5
+  %5 = call arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3)
+  ret { i64, i64, i64 } %5
 }
 
-define arancini { ptr, i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
+define arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func2:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addi sp, sp, -16
@@ -60,15 +60,14 @@ define arancini { ptr, i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
   %6 = add i64 %2, 1
   %7 = add i64 %3, 1
 
-  %ret_val = insertvalue { ptr, i64, i64, i64 } undef, ptr %0, 0
-  %ret_val2 = insertvalue { ptr, i64, i64, i64 } %ret_val, i64 %5, 1
-  %ret_val3 = insertvalue { ptr, i64, i64, i64 } %ret_val2, i64 %6, 2
-  %ret_val4 = insertvalue { ptr, i64, i64, i64 } %ret_val3, i64 %7, 3
+  %ret_val = insertvalue { i64, i64, i64 } undef, i64 %5, 0
+  %ret_val2 = insertvalue { i64, i64, i64 } %ret_val, i64 %6, 1
+  %ret_val3 = insertvalue { i64, i64, i64 } %ret_val2, i64 %7, 2
 
-  ret { ptr, i64, i64, i64 } %ret_val4
+  ret { i64, i64, i64 } %ret_val3
 }
 
-define arancini { ptr, i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) {
+define arancini { i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) {
 ; CHECK-LABEL: func3:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addi sp, sp, -16
@@ -104,10 +103,71 @@ define arancini { ptr, i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) 
   %10 = insertelement <4 x float> %7, float %9, i32 0
   %11 = bitcast <4 x float> %10 to i128
 
-  %ret_val = insertvalue { ptr, i64, i64, i128 } undef, ptr %0, 0
-  %ret_val2 = insertvalue { ptr, i64, i64, i128 } %ret_val, i64 %5, 1
-  %ret_val3 = insertvalue { ptr, i64, i64, i128 } %ret_val2, i64 %6, 2
-  %ret_val4 = insertvalue { ptr, i64, i64, i128 } %ret_val3, i128 %11, 3
+  %ret_val = insertvalue { i64, i64, i128 } undef, i64 %5, 0
+  %ret_val2 = insertvalue { i64, i64, i128 } %ret_val, i64 %6, 1
+  %ret_val3 = insertvalue { i64, i64, i128 } %ret_val2, i128 %11, 2
 
-  ret { ptr, i64, i64, i128 } %ret_val4
+  ret { i64, i64, i128 } %ret_val3
+}
+
+
+define arancini { i64, i64, i64 } @func4(ptr %0, i64 %1, i64 %2, i64 %3) {
+; CHECK-LABEL: func4:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd s1, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset s1, -8
+; CHECK-NEXT:    mv s1, sp
+; CHECK-NEXT:    ld s1, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
+; CHECK-NEXT:    tail func2@plt
+entry:
+    ; Allocate an i64 slot on the stack
+    %stack_slot = alloca i64
+
+    ; Take the address of the stack slot and cast to i64
+    %stack_addr = ptrtoint ptr %stack_slot to i64
+
+    ; Tail call func2 with the new stack address and original parameters
+    %result = tail call arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %stack_addr)
+
+    ; Return the values from func2
+    ret { i64, i64, i64 } %result
+}
+
+
+define arancini { i64, i64, i64 } @func5(ptr %0, i64 %1, i64 %2, i64 %3) {
+; CHECK-LABEL: func5:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd s1, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset s1, -8
+; CHECK-NEXT:    mv s1, sp
+; CHECK-NEXT:    ld s1, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
+; CHECK-NEXT:    tail func2@plt
+entry:
+    ; Allocate an i64 slot on the stack
+    %stack_slot = alloca i64
+
+    ; Take the address of the stack slot and cast to i64
+    %stack_addr = ptrtoint ptr %stack_slot to i64
+
+    ; Tail call func2 with the new stack address and original parameters
+    %result = tail call arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %stack_addr)
+
+    ; Extract each value from the result
+    %i64_val = extractvalue { i64, i64, i64 } %result, 0
+    %i64_val1 = extractvalue { i64, i64, i64 } %result, 1
+    %i64_val2 = extractvalue { i64, i64, i64 } %result, 2
+
+    ; Create a new struct and insert the values one-by-one
+    %new_struct = insertvalue { i64, i64, i64 } undef, i64 %i64_val, 0
+    %new_struct1 = insertvalue { i64, i64, i64 } %new_struct, i64 %i64_val1, 1
+    %new_struct2 = insertvalue { i64, i64, i64 } %new_struct1, i64 %i64_val2, 2
+
+    ; Return the new struct
+    ret { i64, i64, i64 } %new_struct2
 }
