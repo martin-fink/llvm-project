@@ -1118,8 +1118,6 @@ static MachineBasicBlock::iterator convertCalleeSaveRestoreToSPPrePostIncDec(
   unsigned NewOpc;
   switch (MBBI->getOpcode()) {
   default:
-    MBB.dump();
-    MBBI->dump();
     llvm_unreachable("Unexpected callee-save save/restore opcode!");
   case AArch64::STPXi:
     NewOpc = AArch64::STPXpre;
@@ -1464,8 +1462,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
 
   // All calls are tail calls in GHC calling conv, and functions have no
   // prologue/epilogue.
-  if (MF.getFunction().getCallingConv() == CallingConv::GHC
-      || MF.getFunction().getCallingConv() == CallingConv::Arancini)
+  if (MF.getFunction().getCallingConv() == CallingConv::GHC)
     return;
 
   // Set tagged base pointer to the requested stack slot.
@@ -1955,8 +1952,7 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
 
   // All calls are tail calls in GHC calling conv, and functions have no
   // prologue/epilogue.
-  if (MF.getFunction().getCallingConv() == CallingConv::GHC
-      || MF.getFunction().getCallingConv() == CallingConv::Arancini)
+  if (MF.getFunction().getCallingConv() == CallingConv::GHC)
     return;
 
   // How much of the stack used by incoming arguments this function is expected
@@ -2973,8 +2969,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
                                                 RegScavenger *RS) const {
   // All calls are tail calls in GHC calling conv, and functions have no
   // prologue/epilogue.
-  if (MF.getFunction().getCallingConv() == CallingConv::GHC
-      || MF.getFunction().getCallingConv() == CallingConv::Arancini)
+  if (MF.getFunction().getCallingConv() == CallingConv::GHC)
     return;
 
   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);

@@ -385,8 +385,6 @@ def CC_AArch64_GHC : CallingConv<[
   CCIfType<[i64], CCAssignToReg<[X19, X20, X21, X22, X23, X24, X25, X26, X27, X28]>>
 ]>;
 
-
-// TODO: support more than just GPRs
 let Entry = 1 in
 def CC_AArch64_Arancini : CallingConv<[
   CCIfType<[iPTR], CCBitConvertToType<i64>>,
@@ -398,11 +396,6 @@ def CC_AArch64_Arancini : CallingConv<[
   // CPU state + PC + 16 * GPR + FS + GS
   CCIfType<[i64], CCAssignToReg<[X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
 
-  // If more than will fit in registers, pass them on the stack instead.
-  CCIfType<[i64, f64, v1f64, v2f32, v1i64, v2i32, v4i16, v8i8, v4f16, v4bf16],
-           CCAssignToStack<8, 8>>,
-  CCIfType<[f128, v2i64, v4i32, v8i16, v16i8, v4f32, v2f64, v8f16, v8bf16],
-           CCAssignToStack<16, 16>>
 ]>;
 
 let Entry = 1 in
@@ -413,19 +406,6 @@ def RetCC_AArch64_Arancini : CallingConv<[
 
   // skip CPU state, PC + 16 * GPR + FS + GS
   CCIfType<[i64], CCAssignToReg<[X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
-
-  //CCIfType<[i64], CCAssignToReg<[X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X18, X19]>>,
-//  CCIfType<[v1i64, v2i32, v4i16, v8i8, v1f64, v2f32, v4f16, v4bf16],
-//      CCAssignToReg<[D0, D1, D2, D3, D4, D5, D6, D7]>>,
-//  CCIfType<[f128, v2i64, v4i32, v8i16, v16i8, v4f32, v2f64, v8f16, v8bf16],
-//      CCAssignToReg<[Q0, Q1, Q2, Q3, Q4, Q5, Q6, Q7]>>,
-
-//  CCIfType<[nxv16i8, nxv8i16, nxv4i32, nxv2i64, nxv2f16, nxv4f16, nxv8f16,
-//            nxv2bf16, nxv4bf16, nxv8bf16, nxv2f32, nxv4f32, nxv2f64],
-//           CCAssignToReg<[Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7]>>,
-
-//  CCIfType<[nxv1i1, nxv2i1, nxv4i1, nxv8i1, nxv16i1, aarch64svcount],
-//           CCAssignToReg<[P0, P1, P2, P3]>>
 ]>;
 
 // The order of the callee-saves in this file is important, because the
@@ -610,3 +590,7 @@ def CSR_AArch64_SVE_AAPCS_SCS
     : CalleeSavedRegs<(add CSR_AArch64_SVE_AAPCS, X18)>;
 def CSR_AArch64_AAPCS_SCS
     : CalleeSavedRegs<(add CSR_AArch64_AAPCS, X18)>;
+
+// Arancini calling convention, preserve roughly half of the remaining gprs
+def CSR_AArch64_Arancini
+    : CalleeSavedRegs<(add X25, X26, X27, X28, LR, FP, D8, D9, D10, D11, D12, D13, D14, D15)>;
