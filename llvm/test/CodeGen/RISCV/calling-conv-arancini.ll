@@ -63,8 +63,8 @@ define arancini { i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.x v8, a0
 ; CHECK-NEXT:    vsetvli zero, zero, e64, m1, tu, ma
-; CHECK-NEXT:    lui a0, %hi(.LCPI6_0)
-; CHECK-NEXT:    flw ft0, %lo(.LCPI6_0)(a0)
+; CHECK-NEXT:    lui a0, %hi(.LCPI3_0)
+; CHECK-NEXT:    flw ft0, %lo(.LCPI3_0)(a0)
 ; CHECK-NEXT:    vmv.s.x v8, s1
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vfmv.f.s ft1, v8
