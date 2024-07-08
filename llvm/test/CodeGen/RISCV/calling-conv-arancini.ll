@@ -5,12 +5,17 @@
 define arancini i64 @func0(ptr %0) {
 ; CHECK-LABEL: func0:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    .cfi_def_cfa_offset 0
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset ra, -8
 ; CHECK-NEXT:    li t1, 1
 ; CHECK-NEXT:    li t2, 2
 ; CHECK-NEXT:    li s1, 3
 ; CHECK-NEXT:    call func1@plt
 ; CHECK-NEXT:    mv t1, t2
+; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
   %2 = call arancini { i64, i64, i64 } @func1(ptr %0, i64 1, i64 2, i64 3)
   %3 = extractvalue { i64, i64, i64 } %2, 1
@@ -20,8 +25,13 @@ define arancini i64 @func0(ptr %0) {
 define arancini { i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func1:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    .cfi_def_cfa_offset 0
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset ra, -8
 ; CHECK-NEXT:    call func2@plt
+; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
   %5 = call arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3)
   ret { i64, i64, i64 } %5
@@ -53,8 +63,8 @@ define arancini { i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) {
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.x v8, a0
 ; CHECK-NEXT:    vsetvli zero, zero, e64, m1, tu, ma
-; CHECK-NEXT:    lui a0, %hi(.LCPI3_0)
-; CHECK-NEXT:    flw ft0, %lo(.LCPI3_0)(a0)
+; CHECK-NEXT:    lui a0, %hi(.LCPI6_0)
+; CHECK-NEXT:    flw ft0, %lo(.LCPI6_0)(a0)
 ; CHECK-NEXT:    vmv.s.x v8, s1
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vfmv.f.s ft1, v8
