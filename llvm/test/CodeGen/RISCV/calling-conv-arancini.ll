@@ -151,10 +151,6 @@ entry:
 define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
 ; CHECK-LABEL: funcx2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    addi sp, sp, -16
-; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    sd s7, 8(sp) # 8-byte Folded Spill
-; CHECK-NEXT:    .cfi_offset s7, -8
 ; CHECK-NEXT:    addi s1, s1, 1
 ; CHECK-NEXT:    addi a0, a0, 1
 ; CHECK-NEXT:    addi a1, a1, 1
@@ -174,8 +170,6 @@ define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i6
 ; CHECK-NEXT:    addi t4, t4, 1
 ; CHECK-NEXT:    addi t5, t5, 1
 ; CHECK-NEXT:    addi t6, t6, 1
-; CHECK-NEXT:    ld s7, 8(sp) # 8-byte Folded Reload
-; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
   %21 = add i64 %1, 1
   %22 = add i64 %2, 1
@@ -226,12 +220,9 @@ define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i6
 ; CHECK-NEXT:    addi sp, sp, -16
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
-; CHECK-NEXT:    sd s7, 0(sp) # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset ra, -8
-; CHECK-NEXT:    .cfi_offset s7, -16
 ; CHECK-NEXT:    call funcx2@plt
 ; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
-; CHECK-NEXT:    ld s7, 0(sp) # 8-byte Folded Reload
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
   %21 = call arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19)
