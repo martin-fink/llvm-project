@@ -12591,8 +12591,6 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
                               std::optional<unsigned> FirstMaskArgument) {
   // CPU state + 16 * x86 gpr + PC + FS + GS
   static const MCPhysReg GPRList[] = {
-      RISCV::X5,
-      RISCV::X6,
       RISCV::X7,
       RISCV::X9,
       RISCV::X10,
@@ -12607,6 +12605,8 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
       RISCV::X19,
       RISCV::X20,
       RISCV::X21,
+      RISCV::X22,
+      RISCV::X23,
       RISCV::X28,
       RISCV::X29,
       RISCV::X30,
@@ -12614,8 +12614,6 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
   };
   static const MCPhysReg GPRRetList[] = {
       // skip the cpu state ptr
-      RISCV::X6,
-      RISCV::X7,
       RISCV::X9,
       RISCV::X10,
       RISCV::X11,
@@ -12629,6 +12627,8 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
       RISCV::X19,
       RISCV::X20,
       RISCV::X21,
+      RISCV::X22,
+      RISCV::X23,
       RISCV::X28,
       RISCV::X29,
       RISCV::X30,
@@ -12643,6 +12643,7 @@ static bool CC_RISCV_Arancini(const DataLayout &DL, RISCVABI::ABI ABI,
     }
   }
 
+  report_fatal_error("calling convention did not match");
   return true; // CC didn't match.
 }
 

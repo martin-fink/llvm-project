@@ -9,11 +9,11 @@ define arancini i64 @func0(ptr %0) {
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset ra, -8
-; CHECK-NEXT:    li t1, 1
-; CHECK-NEXT:    li t2, 2
-; CHECK-NEXT:    li s1, 3
+; CHECK-NEXT:    li s1, 1
+; CHECK-NEXT:    li a0, 2
+; CHECK-NEXT:    li a1, 3
 ; CHECK-NEXT:    call func1@plt
-; CHECK-NEXT:    mv t1, t2
+; CHECK-NEXT:    mv s1, a0
 ; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    ret
@@ -40,9 +40,9 @@ define arancini { i64, i64, i64 } @func1(ptr %0, i64 %1, i64 %2, i64 %3) {
 define arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK-LABEL: func2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    addi t1, t1, 1
-; CHECK-NEXT:    addi t2, t2, 1
 ; CHECK-NEXT:    addi s1, s1, 1
+; CHECK-NEXT:    addi a0, a0, 1
+; CHECK-NEXT:    addi a1, a1, 1
 ; CHECK-NEXT:    ret
   %5 = add i64 %1, 1
   %6 = add i64 %2, 1
@@ -58,23 +58,23 @@ define arancini { i64, i64, i64 } @func2(ptr %0, i64 %1, i64 %2, i64 %3) {
 define arancini { i64, i64, i128 } @func3(ptr %0, i64 %1, i64 %2, i128 %3) {
 ; CHECK-LABEL: func3:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    addi t1, t1, 1
-; CHECK-NEXT:    addi t2, t2, 1
+; CHECK-NEXT:    addi s1, s1, 1
+; CHECK-NEXT:    addi a0, a0, 1
 ; CHECK-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
-; CHECK-NEXT:    vmv.v.x v8, a0
+; CHECK-NEXT:    vmv.v.x v8, a2
 ; CHECK-NEXT:    vsetvli zero, zero, e64, m1, tu, ma
-; CHECK-NEXT:    lui a0, %hi(.LCPI3_0)
-; CHECK-NEXT:    flw ft0, %lo(.LCPI3_0)(a0)
-; CHECK-NEXT:    vmv.s.x v8, s1
+; CHECK-NEXT:    lui a2, %hi(.LCPI3_0)
+; CHECK-NEXT:    flw ft0, %lo(.LCPI3_0)(a2)
+; CHECK-NEXT:    vmv.s.x v8, a1
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vfmv.f.s ft1, v8
 ; CHECK-NEXT:    fadd.s ft0, ft1, ft0
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, tu, ma
 ; CHECK-NEXT:    vfmv.s.f v8, ft0
 ; CHECK-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
-; CHECK-NEXT:    vmv.x.s s1, v8
+; CHECK-NEXT:    vmv.x.s a1, v8
 ; CHECK-NEXT:    vslidedown.vi v8, v8, 1
-; CHECK-NEXT:    vmv.x.s a0, v8
+; CHECK-NEXT:    vmv.x.s a2, v8
 ; CHECK-NEXT:    ret
   %5 = add i64 %1, 1
   %6 = add i64 %2, 1
@@ -98,7 +98,7 @@ define arancini { i64, i64, i64 } @func4(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    addi sp, sp, -16
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    addi s1, sp, 8
+; CHECK-NEXT:    addi a1, sp, 8
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    tail func2@plt
 entry:
@@ -121,7 +121,7 @@ define arancini { i64, i64, i64 } @func5(ptr %0, i64 %1, i64 %2, i64 %3) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    addi sp, sp, -16
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    addi s1, sp, 8
+; CHECK-NEXT:    addi a1, sp, 8
 ; CHECK-NEXT:    addi sp, sp, 16
 ; CHECK-NEXT:    tail func2@plt
 entry:
@@ -146,4 +146,104 @@ entry:
 
     ; Return the new struct
     ret { i64, i64, i64 } %new_struct2
+}
+
+define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
+; CHECK-LABEL: funcx2:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd s7, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset s7, -8
+; CHECK-NEXT:    addi s1, s1, 1
+; CHECK-NEXT:    addi a0, a0, 1
+; CHECK-NEXT:    addi a1, a1, 1
+; CHECK-NEXT:    addi a2, a2, 1
+; CHECK-NEXT:    addi a3, a3, 1
+; CHECK-NEXT:    addi a4, a4, 1
+; CHECK-NEXT:    addi a5, a5, 1
+; CHECK-NEXT:    addi a6, a6, 1
+; CHECK-NEXT:    addi a7, a7, 1
+; CHECK-NEXT:    addi s2, s2, 1
+; CHECK-NEXT:    addi s3, s3, 1
+; CHECK-NEXT:    addi s4, s4, 1
+; CHECK-NEXT:    addi s5, s5, 1
+; CHECK-NEXT:    addi s6, s6, 1
+; CHECK-NEXT:    addi s7, s7, 1
+; CHECK-NEXT:    addi t3, t3, 1
+; CHECK-NEXT:    addi t4, t4, 1
+; CHECK-NEXT:    addi t5, t5, 1
+; CHECK-NEXT:    addi t6, t6, 1
+; CHECK-NEXT:    ld s7, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
+; CHECK-NEXT:    ret
+  %21 = add i64 %1, 1
+  %22 = add i64 %2, 1
+  %23 = add i64 %3, 1
+  %24 = add i64 %4, 1
+  %25 = add i64 %5, 1
+  %26 = add i64 %6, 1
+  %27 = add i64 %7, 1
+  %28 = add i64 %8, 1
+  %29 = add i64 %9, 1
+  %30 = add i64 %10, 1
+  %31 = add i64 %11, 1
+  %32 = add i64 %12, 1
+  %33 = add i64 %13, 1
+  %34 = add i64 %14, 1
+  %35 = add i64 %15, 1
+  %36 = add i64 %16, 1
+  %37 = add i64 %17, 1
+  %38 = add i64 %18, 1
+  %39 = add i64 %19, 1
+
+  %ret_val = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } undef, i64 %21, 0
+  %ret_val2 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val, i64 %22, 1
+  %ret_val3 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val2, i64 %23, 2
+  %ret_val4 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val3, i64 %24, 3
+  %ret_val5 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val4, i64 %25, 4
+  %ret_val6 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val5, i64 %26, 5
+  %ret_val7 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val6, i64 %27, 6
+  %ret_val8 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val7, i64 %28, 7
+  %ret_val9 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val8, i64 %29, 8
+  %ret_val10 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val9, i64 %30, 9
+  %ret_val11 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val10, i64 %31, 10
+  %ret_val12 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val11, i64 %32, 11
+  %ret_val13 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val12, i64 %33, 12
+  %ret_val14 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val13, i64 %34, 13
+  %ret_val15 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val14, i64 %35, 14
+  %ret_val16 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val15, i64 %36, 15
+  %ret_val17 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val16, i64 %37, 16
+  %ret_val18 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val17, i64 %38, 17
+  %ret_val19 = insertvalue { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val18, i64 %39, 18
+
+  ret { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %ret_val19
+}
+
+define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx3(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
+; CHECK-LABEL: funcx3:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    addi sp, sp, -16
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
+; CHECK-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    sd s7, 0(sp) # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset ra, -8
+; CHECK-NEXT:    .cfi_offset s7, -16
+; CHECK-NEXT:    call funcx2@plt
+; CHECK-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    ld s7, 0(sp) # 8-byte Folded Reload
+; CHECK-NEXT:    addi sp, sp, 16
+; CHECK-NEXT:    ret
+  %21 = call arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19)
+
+  ret { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %21
+}
+
+define arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx4(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19) {
+; CHECK-LABEL: funcx4:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    tail funcx2@plt
+  %21 = tail call arancini { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } @funcx2(ptr %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, i64 %7, i64 %8, i64 %9, i64 %10, i64 %11, i64 %12, i64 %13, i64 %14, i64 %15, i64 %16, i64 %17, i64 %18, i64 %19)
+
+  ret { i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64 } %21
 }
